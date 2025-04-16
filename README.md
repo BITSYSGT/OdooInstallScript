@@ -16,6 +16,7 @@ Este repositorio contiene un script de instalación automatizado para **Odoo 18*
 Puedes descargar este repositorio utilizando `wget` directamente desde tu servidor:
 
 ```bash
-wget https://github.com/BitSystemsSAB/OdooInstallScript/archive/main.zip
+wget https://github.com/BITSYSGT/OdooInstallScript/blob/main/odoo_installer.sh
+wget https://github.com/BITSYSGT/OdooInstallScript/blob/main/odoo_uninstall.sh
 unzip main.zip
 cd OdooInstallScript-main
