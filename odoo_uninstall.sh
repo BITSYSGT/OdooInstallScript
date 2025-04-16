@@ -9,6 +9,7 @@ OE_USER="odoo"
 OE_HOME="/opt/$OE_USER"
 OE_CONFIG="/etc/odoo.conf"
 OE_SERVICE="/etc/systemd/system/odoo.service"
+OE_ENTERPRISE="$OE_HOME/enterprise"
 
 echo "⚠️ Este script eliminará Odoo 18 y su configuración."
 read -p "¿Estás seguro? (s/N): " confirm
@@ -27,6 +28,12 @@ rm -f $OE_SERVICE
 rm -f $OE_CONFIG
 rm -rf /etc/odoo
 rm -rf /var/log/odoo
+
+# Eliminar la carpeta Enterprise si fue instalada
+if [ -d "$OE_ENTERPRISE" ]; then
+  echo "🧹 Eliminando carpeta de Enterprise..."
+  rm -rf $OE_ENTERPRISE
+fi
 
 echo "👤 Eliminando usuario del sistema '$OE_USER'..."
 userdel -r $OE_USER 2>/dev/null
