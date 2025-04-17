@@ -4,7 +4,7 @@
 # │ ODOO INSTALLER MULTIINSTANCIA                              │
 # │ Autor: Bit Systems, S.A.                                   │
 # │ Soporte: https://bitsys.odoo.com                           │
-# │ Compatible: Ubuntu 22.04+ / Odoo 18.0                      │
+# │ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │
 # ╰────────────────────────────────────────────────────────────╯
 
 clear
@@ -13,16 +13,68 @@ echo "╭───────────────────────�
 echo "│ ODOO INSTALLER MULTITENANT (ODOO MIT)                      │"
 echo "│ Autor: Bitsys | GT                                         │"
 echo "│ Soporte: https://bitsys.odoo.com                           │"
-echo "│ Compatible: Ubuntu 22.04+ / Odoo 18.0                      │"
+echo "│ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │"
 echo "╰────────────────────────────────────────────────────────────╯"
 
+# Función para verificar si un puerto está en uso
+check_port() {
+    local port=$1
+    if ss -tuln | grep -q ":$port "; then
+        return 0  # Puerto en uso
+    else
+        return 1  # Puerto disponible
+    fi
+}
+
+# Función para encontrar puerto disponible
+find_available_port() {
+    local base_port=$1
+    local increment=0
+    local max_attempts=20
+    local found_port=0
+    
+    while [ $increment -lt $max_attempts ]; do
+        local test_port=$((base_port + increment))
+        if ! check_port $test_port; then
+            found_port=$test_port
+            break
+        fi
+        ((increment++))
+    done
+    
+    echo $found_port
+}
+
+# Paso 0: Configuración inicial
 echo "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): "
 read ODOO_VERSION
 
 DEFAULT_PORT="8071"
-echo "🔹 Puerto por defecto para Odoo: $DEFAULT_PORT"
-read -p "🔹 Ingrese el puerto para Odoo (Enter para usar $DEFAULT_PORT): " PORT
-PORT=${PORT:-$DEFAULT_PORT}
+
+# Verificar si el puerto por defecto está disponible
+if check_port $DEFAULT_PORT; then
+    echo "⚠️ El puerto por defecto $DEFAULT_PORT está en uso."
+    AVAILABLE_PORT=$(find_available_port $DEFAULT_PORT)
+    
+    if [ $AVAILABLE_PORT -eq 0 ]; then
+        echo "❌ No se encontró un puerto disponible automáticamente."
+        read -p "🔹 Ingrese manualmente el puerto para Odoo: " PORT
+    else
+        echo "🔹 Se recomienda usar el puerto: $AVAILABLE_PORT"
+        read -p "🔹 Ingrese el puerto para Odoo (Enter para usar $AVAILABLE_PORT): " PORT
+        PORT=${PORT:-$AVAILABLE_PORT}
+    fi
+else
+    echo "✅ Puerto $DEFAULT_PORT está disponible."
+    read -p "🔹 Ingrese el puerto para Odoo (Enter para usar $DEFAULT_PORT): " PORT
+    PORT=${PORT:-$DEFAULT_PORT}
+fi
+
+# Verificar nuevamente el puerto seleccionado
+while check_port $PORT; do
+    echo "❌ El puerto $PORT ya está en uso. Por favor elija otro."
+    read -p "🔹 Ingrese un puerto diferente: " PORT
+done
 
 read -p "🔹 ¿Deseas instalar la versión Enterprise? (s/N): " INSTALL_ENTERPRISE
 INSTALL_ENTERPRISE=${INSTALL_ENTERPRISE,,}  # convertir a minúscula
@@ -38,7 +90,7 @@ ODOO_ENTERPRISE_REPO="https://github.com/odoo/enterprise.git"
 CONFIG_FILE="/etc/odoo$ODOO_VERSION.conf"
 LOG_FILE="/var/log/odoo$ODOO_VERSION/odoo.log"
 SERVICE_FILE="/etc/systemd/system/odoo$ODOO_VERSION.service"
-DB_PASSWORD=$ODOO_USER
+DB_PASSWORD=$(openssl rand -hex 12)
 MASTER_PASSWORD=$(openssl rand -hex 16)
 
 # Paso 1: Verificar sistema y dependencias
@@ -48,34 +100,11 @@ sudo apt install -y python3-dev python3-pip python3-venv build-essential \
     libsasl2-dev libldap2-dev libssl-dev libmysqlclient-dev \
     libjpeg-dev liblcms2-dev libblas-dev libatlas-base-dev \
     libxml2-dev libxslt1-dev zlib1g-dev npm git postgresql \
-    libpq-dev gcc certbot
+    libpq-dev gcc nginx certbot python3-certbot-nginx
 
-# Paso 2: Solucionar problemas con Nginx antes de instalarlo
-echo "🔧 Solucionando posibles problemas con Nginx..."
-sudo apt remove --purge nginx* -y
-sudo apt autoremove -y
-sudo rm -rf /etc/nginx
-
-# Instalar Nginx y dependencias correctamente
-echo "🔧 Reinstalando Nginx y dependencias..."
-sudo apt install -y nginx python3-certbot-nginx
-
-# Verificar si la instalación de Nginx fue exitosa
-if ! command -v nginx &> /dev/null; then
-    echo "⚠️ Error crítico: No se pudo instalar Nginx correctamente."
-    echo "Por favor, ejecute manualmente: sudo apt install -y nginx"
-    echo "Y luego vuelva a ejecutar este script."
-    exit 1
-fi
-
-# Crear estructura básica de Nginx si no existe
-echo "🔧 Configurando estructura de directorios de Nginx..."
-sudo mkdir -p /etc/nginx/{sites-available,sites-enabled,conf.d}
-sudo mkdir -p /var/log/nginx
-
-# Crear archivo de configuración básico si no existe
+# Paso 2: Configuración de Nginx
+echo "🔧 Configurando Nginx..."
 if [ ! -f "/etc/nginx/nginx.conf" ]; then
-    echo "🔧 Creando archivo de configuración básico para Nginx..."
     sudo tee /etc/nginx/nginx.conf > /dev/null <<EOF
 user www-data;
 worker_processes auto;
@@ -103,20 +132,6 @@ http {
 EOF
 fi
 
-# Verificar si el archivo mime.types existe
-if [ ! -f "/etc/nginx/mime.types" ]; then
-    echo "🔧 Descargando archivo mime.types..."
-    sudo curl -o /etc/nginx/mime.types https://raw.githubusercontent.com/nginx/nginx/master/conf/mime.types
-fi
-
-# Verificar configuración de Nginx
-sudo nginx -t || {
-    echo "⚠️ Error en la configuración de Nginx. Solucionando problemas..."
-    sudo apt install --reinstall nginx-common -y
-    sudo nginx -t
-}
-
-# Reiniciar Nginx
 sudo systemctl restart nginx
 
 # Paso 3: Crear usuario si no existe
@@ -134,13 +149,13 @@ fi
 sudo mkdir -p "$ODOO_DIR"
 sudo chown $USER:$USER "$ODOO_DIR"
 
-# Paso 5: Mostrar y clonar repositorios
+# Paso 5: Clonar repositorios
 ODOO_BRANCH="${ODOO_VERSION}.0"
-echo "📦 Se descargará el repositorio de Odoo desde la rama: $ODOO_BRANCH"
+echo "📦 Descargando Odoo $ODOO_VERSION (rama $ODOO_BRANCH)..."
 git clone --depth 1 --branch $ODOO_BRANCH $ODOO_REPO "$ODOO_DIR/odoo"
 
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
-    echo "📦 Clonando Odoo Enterprise $ODOO_VERSION desde la rama $ODOO_BRANCH..."
+    echo "📦 Clonando Odoo Enterprise $ODOO_VERSION..."
     git clone --depth 1 --branch $ODOO_BRANCH https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
 fi
 
@@ -189,20 +204,17 @@ EOF
 
 # Paso 10: Asignar permisos y habilitar servicio
 sudo chown -R $ODOO_USER:$ODOO_USER "$ODOO_DIR"
-sudo systemctl daemon-reexec
 sudo systemctl daemon-reload
 sudo systemctl enable odoo$ODOO_VERSION
 sudo systemctl start odoo$ODOO_VERSION
 
-# Paso 11: Configuración de Nginx y Certbot (Let's Encrypt)
+# Paso 11: Configuración de Nginx y Certbot
 echo "🔧 Configurando Nginx y Certbot..."
+DOMAIN=""
+while [ -z "$DOMAIN" ]; do
+    read -p "🔹 Ingrese el dominio para Odoo (ej: odoo.midominio.com): " DOMAIN
+done
 
-# Crear archivo de configuración de Nginx
-DOMAIN="tu-dominio.com"
-echo "🔹 Ingrese el dominio de Odoo para la configuración de Nginx: "
-read DOMAIN
-
-# Configurar sitio de Nginx para Odoo
 sudo tee /etc/nginx/sites-available/odoo$ODOO_VERSION > /dev/null <<EOF
 server {
     listen 80;
@@ -221,58 +233,49 @@ server {
 }
 EOF
 
-# Crear el enlace simbólico en sites-enabled
 sudo ln -s /etc/nginx/sites-available/odoo$ODOO_VERSION /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl restart nginx
 
-# Verificar configuración de Nginx
-sudo nginx -t
-
-# Reiniciar Nginx
-sudo systemctl restart nginx
-
-# Si el dominio es válido, configurar Certbot para Let's Encrypt
-if curl --head --silent --fail "$DOMAIN" > /dev/null; then
-    echo "🔧 Dominio válido, procediendo con la validación de Certbot..."
-    sudo certbot --nginx -d $DOMAIN
+# Configurar Certbot si el dominio resuelve
+if ping -c 1 $DOMAIN &> /dev/null; then
+    sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN
+    sudo systemctl restart nginx
 else
-    echo "⚠️ Dominio no válido. Asegúrese de que su dominio apunte a este servidor antes de validar con Certbot."
-    echo "Realice la validación de Certbot más tarde cuando el dominio esté correctamente configurado."
+    echo "⚠️ El dominio $DOMAIN no resuelve. Configure DNS primero y luego ejecute:"
+    echo "   sudo certbot --nginx -d $DOMAIN"
 fi
 
-# Paso 12: Final
+# Paso 12: Mostrar resumen de instalación
 IP=$(hostname -I | awk '{print $1}')
 ADDONS_PATH="$ODOO_DIR/odoo/addons"
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
-    ADDONS_PATH="$ADDONS_PATH, $ODOO_DIR/enterprise"
-    ENTERPRISE_STATUS="Instalado"
+    ADDONS_PATH="$ADDONS_PATH,$ODOO_DIR/enterprise"
+    ENTERPRISE_STATUS="✅ Instalado"
 else
-    ENTERPRISE_STATUS="No Instalado"
+    ENTERPRISE_STATUS="❌ No instalado"
 fi
 
 echo ""
-echo "==================================================="
-echo "🎉 INSTALACIÓN COMPLETA DE ODOO $ODOO_VERSION"
-echo "==================================================="
-echo "Puerto:             $PORT"
-echo "Usuario PostgreSQL: $ODOO_USER"
-echo "Contraseña DB:      $DB_PASSWORD"
-echo "Ruta:               $ODOO_DIR"
-echo "Log:                $LOG_FILE"
-echo "Config:             $CONFIG_FILE"
-echo "Addons:             $ADDONS_PATH"
-echo "Master Password:    $MASTER_PASSWORD"
-echo "Enterprise:         $ENTERPRISE_STATUS"
-echo "URL:                http://$IP:$PORT"
-echo "==================================================="
-echo "📌 Comandos para gestionar el servicio:"
-echo "  - Iniciar:        sudo systemctl start odoo$ODOO_VERSION"
-echo "  - Detener:        sudo systemctl stop odoo$ODOO_VERSION"
-echo "  - Reiniciar:      sudo systemctl restart odoo$ODOO_VERSION"
-echo "  - Ver estado:     sudo systemctl status odoo$ODOO_VERSION"
-echo "  - Ver logs:       tail -f $LOG_FILE"
-
-# Mostrar ruta de Nginx y sites-available
-echo "🔧 La configuración de Nginx para Odoo $ODOO_VERSION se encuentra en:"
-echo "/etc/nginx/sites-available/odoo$ODOO_VERSION"
-echo "🔧 El enlace simbólico a la configuración está en:"
-echo "/etc/nginx/sites-enabled/odoo$ODOO_VERSION"
+echo "╭────────────────────────────────────────────────────────────╮"
+echo "│ 🎉 INSTALACIÓN COMPLETA DE ODOO $ODOO_VERSION"
+echo "├────────────────────────────────────────────────────────────┤"
+echo "│ 🔹 Puerto:             $PORT"
+echo "│ 🔹 Usuario:            $ODOO_USER"
+echo "│ 🔹 Contraseña DB:      $DB_PASSWORD"
+echo "│ 🔹 Master Password:    $MASTER_PASSWORD"
+echo "│ 🔹 Ruta instalación:   $ODOO_DIR"
+echo "│ 🔹 Addons Path:        $ADDONS_PATH"
+echo "│ 🔹 Enterprise:         $ENTERPRISE_STATUS"
+echo "├────────────────────────────────────────────────────────────┤"
+echo "│ 🔗 Accesos:"
+echo "│    - Directo:         http://$IP:$PORT"
+echo "│    - Nginx:           http://$DOMAIN"
+echo "├────────────────────────────────────────────────────────────┤"
+echo "│ ⚙️  Comandos útiles:"
+echo "│    - Iniciar:        sudo systemctl start odoo$ODOO_VERSION"
+echo "│    - Detener:        sudo systemctl stop odoo$ODOO_VERSION"
+echo "│    - Reiniciar:      sudo systemctl restart odoo$ODOO_VERSION"
+echo "│    - Ver logs:       journalctl -u odoo$ODOO_VERSION -f"
+echo "╰────────────────────────────────────────────────────────────╯"
+echo ""
+echo "⚠️ IMPORTANTE: Guarde esta información en un lugar seguro ⚠️"
