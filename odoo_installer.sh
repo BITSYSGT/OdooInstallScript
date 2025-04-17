@@ -1,94 +1,74 @@
 #!/bin/bash
 
-#====================================================
+#===============================================
+# Script de instalación multiinstancia Odoo
 # Autor: Bit Systems, S.A.
-# Script para instalar Odoo 15, 16, 17 o 18 en Ubuntu 24.04 LTS
-#====================================================
+# Compatible con: Ubuntu 22.04 y 24.04 LTS
+#===============================================
 
-#=======================
-# VERIFICAR SISTEMA OPERATIVO
-#=======================
-. /etc/os-release
-if [[ "$NAME" != "Ubuntu" || "$VERSION_ID" != "24.04" ]]; then
-    echo "Este script está diseñado para Ubuntu 24.04 LTS."
-    echo "Detectado: $NAME $VERSION_ID"
-    read -p "¿Deseas continuar de todas formas? (s/n): " CONTINUE_ANYWAY
-    if [[ "$CONTINUE_ANYWAY" != "s" && "$CONTINUE_ANYWAY" != "S" ]]; then
-        echo "Abortando instalación."
-        exit 1
-    fi
+# Detectar versión del sistema operativo
+OS_VERSION=$(lsb_release -rs)
+if [[ "$OS_VERSION" != "24.04" && "$OS_VERSION" != "22.04" ]]; then
+  echo "❌ Este script está diseñado para Ubuntu 22.04 o 24.04 LTS."
+  exit 1
 fi
 
-#=======================
-# CONFIGURACIONES
-#=======================
-echo "---- ¿Qué versión de Odoo deseas instalar? (15, 16, 17, 18) ----"
-read OE_VERSION
-if [[ "$OE_VERSION" != "15" && "$OE_VERSION" != "16" && "$OE_VERSION" != "17" && "$OE_VERSION" != "18" ]]; then
-    echo "Versión no soportada. Solo se permiten: 15, 16, 17, 18."
-    exit 1
+# Solicitar versión de Odoo a instalar
+read -p "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): " OE_VERSION
+if [[ ! "$OE_VERSION" =~ ^(15|16|17|18)$ ]]; then
+  echo "❌ Versión no válida."
+  exit 1
 fi
 
-OE_USER="odoo"
+# Ajustes de instancia
+OE_USER="odoo$OE_VERSION"
 OE_HOME="/opt/$OE_USER"
-OE_PORT="8070"
-OE_SUPERADMIN="odoo"
-OE_CONFIG="/etc/odoo.conf"
-LOGFILE="/var/log/odoo/odoo.log"
+OE_PORT_DEFAULT=$((8068 + (OE_VERSION - 15)))
+read -p "🔹 Ingrese el puerto para Odoo (Enter para usar $OE_PORT_DEFAULT): " OE_PORT
+OE_PORT=${OE_PORT:-$OE_PORT_DEFAULT}
+OE_CONFIG="/etc/${OE_USER}.conf"
+OE_SERVICE="/etc/systemd/system/${OE_USER}.service"
+LOGFILE="/var/log/${OE_USER}/odoo.log"
+OE_SUPERADMIN="$OE_USER"
 ADMIN_PASSWORD=$(openssl rand -hex 16)
 
-echo "---- ¿Instalar versión Enterprise? (s/n) ----"
+# Enterprise
+echo "🔹 ¿Deseas instalar la versión Enterprise? (s/N): "
 read INSTALL_ENTERPRISE
-
-if [[ "$INSTALL_ENTERPRISE" == "s" || "$INSTALL_ENTERPRISE" == "S" ]]; then
-    IS_ENTERPRISE=true
-    echo "---- Ingresa tu token de acceso a GitHub ----"
-    read GITHUB_TOKEN
+if [[ "$INSTALL_ENTERPRISE" =~ ^[sS]$ ]]; then
+  IS_ENTERPRISE=true
+  read -p "🔹 Ingresa tu token de acceso a GitHub: " GITHUB_TOKEN
 else
-    IS_ENTERPRISE=false
+  IS_ENTERPRISE=false
 fi
 
-#=======================
-# ACTUALIZACIÓN E INSTALACIÓN DE DEPENDENCIAS
-#=======================
-echo "---- Actualizando sistema ----"
+# Preparación del sistema
 apt-get update && apt-get upgrade -y
-
-echo "---- Instalando dependencias del sistema ----"
 apt-get install -y python3-dev python3-pip python3-venv build-essential \
-    libsasl2-dev libldap2-dev libssl-dev libmysqlclient-dev libjpeg-dev \
-    liblcms2-dev libblas-dev libatlas-base-dev libxml2-dev libxslt1-dev \
-    zlib1g-dev npm git postgresql libpq-dev gcc wget curl
+  libsasl2-dev libldap2-dev libssl-dev libmysqlclient-dev libjpeg-dev \
+  liblcms2-dev libblas-dev libatlas-base-dev libxml2-dev libxslt1-dev \
+  zlib1g-dev npm git postgresql libpq-dev gcc
 
-#=======================
-# CREAR USUARIO Y CLONAR REPOSITORIO
-#=======================
-echo "---- Creando usuario del sistema: $OE_USER ----"
+# Crear usuario
 adduser --system --home=$OE_HOME --group --disabled-password --shell=/bin/bash $OE_USER
 
-echo "---- Clonando código fuente de Odoo ----"
+# Clonar Odoo
 git config --global http.postBuffer 524288000
-git clone https://github.com/odoo/odoo --branch $OE_VERSION.0 --single-branch $OE_HOME
+git clone https://github.com/odoo/odoo --branch $OE_VERSION --single-branch $OE_HOME
 chown -R $OE_USER: $OE_HOME
 
-#=======================
-# CLONAR ENTERPRISE (SI APLICA)
-#=======================
+# Enterprise
 if [ "$IS_ENTERPRISE" = true ]; then
-    echo "---- Clonando módulos Enterprise ----"
-    mkdir -p $OE_HOME/enterprise
-    git clone https://$GITHUB_TOKEN@github.com/odoo/enterprise.git --branch $OE_VERSION.0 --single-branch $OE_HOME/enterprise
-    chown -R $OE_USER: $OE_HOME/enterprise
-    ADDONS_PATH="$OE_HOME/addons,$OE_HOME/enterprise"
+  mkdir -p $OE_HOME/enterprise
+  git clone https://$GITHUB_TOKEN@github.com/odoo/enterprise.git --branch $OE_VERSION --single-branch $OE_HOME/enterprise
+  chown -R $OE_USER: $OE_HOME/enterprise
+  ADDONS_PATH="$OE_HOME/addons,$OE_HOME/enterprise"
 else
-    ADDONS_PATH="$OE_HOME/addons"
+  ADDONS_PATH="$OE_HOME/addons"
 fi
 
-#=======================
-# ARCHIVO DE CONFIGURACIÓN
-#=======================
-echo "---- Creando archivo de configuración ----"
-mkdir -p /etc/odoo /var/log/odoo
+# Configuración
+mkdir -p /etc/odoo /var/log/$OE_USER
 touch $LOGFILE
 chown $OE_USER: $LOGFILE
 
@@ -107,46 +87,23 @@ EOF
 chmod 640 $OE_CONFIG
 chown $OE_USER: $OE_CONFIG
 
-#=======================
-# BASE DE DATOS
-#=======================
-echo "---- Configurando PostgreSQL ----"
+# PostgreSQL
 sudo -u postgres psql -c "CREATE ROLE $OE_SUPERADMIN WITH LOGIN SUPERUSER CREATEDB CREATEROLE PASSWORD '$OE_SUPERADMIN';"
 
-#=======================
-# DEPENDENCIAS DE PYTHON
-#=======================
-echo "---- Instalando dependencias de Python ----"
+# Requisitos Python
 cd $OE_HOME
+pip install --break-system-packages -r requirements.txt
 
-# Usar requirements.txt según versión
-if [[ "$OE_VERSION" == "18" ]]; then
-    pip install --break-system-packages -r requirements.txt
-else
-    case "$OE_VERSION" in
-        "15") PYTHON_REQUIREMENTS_URL="https://raw.githubusercontent.com/odoo/odoo/15.0/requirements.txt" ;;
-        "16") PYTHON_REQUIREMENTS_URL="https://raw.githubusercontent.com/odoo/odoo/16.0/requirements.txt" ;;
-        "17") PYTHON_REQUIREMENTS_URL="https://raw.githubusercontent.com/odoo/odoo/17.0/requirements.txt" ;;
-    esac
-    wget $PYTHON_REQUIREMENTS_URL -O /tmp/requirements.txt
-    pip install --break-system-packages -r /tmp/requirements.txt
-fi
-
-#=======================
-# SERVICIO SYSTEMD
-#=======================
-echo "---- Configurando servicio de Odoo ----"
-cat <<EOF > /etc/systemd/system/odoo.service
+# Servicio systemd
+cat <<EOF > $OE_SERVICE
 [Unit]
-Description=Odoo
-Documentation=http://www.odoo.com
+Description=Odoo $OE_VERSION
 After=postgresql.service
 
 [Service]
 Type=simple
 User=$OE_USER
 ExecStart=/usr/bin/python3 $OE_HOME/odoo-bin -c $OE_CONFIG
-ExecStop=/bin/kill -SIGTERM \$MAINPID
 KillMode=process
 KillSignal=SIGINT
 TimeoutSec=300
@@ -156,35 +113,25 @@ WantedBy=default.target
 EOF
 
 systemctl daemon-reload
-systemctl start odoo
-systemctl enable odoo
+systemctl start $OE_USER
+systemctl enable $OE_USER
 
-#=======================
-# NGINX Y CERTBOT
-#=======================
-echo "---- Instalando Nginx y Certbot ----"
+# Nginx + Certbot
 apt-get install -y nginx certbot python3-certbot-nginx
 
-#=======================
-# INFO FINAL
-#=======================
+# Mostrar info
 SERVER_IP=$(hostname -I | awk '{print $1}')
-echo ""
-echo "======================================================="
-echo "  INSTALACIÓN COMPLETA DE ODOO $OE_VERSION EN UBUNTU 24.04 LTS"
-echo "======================================================="
-echo "Puerto XMLRPC:        $OE_PORT"
-echo "Usuario PostgreSQL:   $OE_SUPERADMIN"
-echo "Contraseña PostgreSQL:$OE_SUPERADMIN"
-echo "Ruta de instalación:  $OE_HOME"
-echo "Ruta del log:         $LOGFILE"
-echo "Archivo de config:    $OE_CONFIG"
-echo "Ruta de addons:       $ADDONS_PATH"
-echo "Master Password:      $ADMIN_PASSWORD"
-if [ "$IS_ENTERPRISE" = true ]; then
-    echo "Enterprise:           Instalado"
-else
-    echo "Enterprise:           No instalado"
-fi
-echo "Accede a Odoo en:     http://$SERVER_IP:$OE_PORT"
-echo "======================================================="
+echo "\n==================================================="
+echo "🎉 INSTALACIÓN COMPLETA DE ODOO $OE_VERSION"
+echo "===================================================="
+echo "Puerto:             $OE_PORT"
+echo "Usuario PostgreSQL: $OE_SUPERADMIN"
+echo "Contraseña DB:       $OE_SUPERADMIN"
+echo "Ruta:               $OE_HOME"
+echo "Log:                $LOGFILE"
+echo "Config:             $OE_CONFIG"
+echo "Addons:             $ADDONS_PATH"
+echo "Master Password:    $ADMIN_PASSWORD"
+echo "Enterprise:         $( [ "$IS_ENTERPRISE" = true ] && echo 'Sí' || echo 'No')"
+echo "URL:                http://$SERVER_IP:$OE_PORT"
+echo "==================================================="

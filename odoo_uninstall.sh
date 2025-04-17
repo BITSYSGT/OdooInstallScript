@@ -1,14 +1,15 @@
 #!/bin/bash
 
 #==============================
-# Script de desinstalación Odoo
+# Script de desinstalación Odoo (Multiinstancia)
 # Desarrollado por Bit Systems, S.A.
 #==============================
 
-OE_USER="odoo"
+read -p "🔍 Ingresa el número de puerto de la instancia de Odoo a eliminar: " OE_PORT
+OE_USER="odoo$OE_PORT"
 OE_HOME="/opt/$OE_USER"
-OE_CONFIG="/etc/odoo.conf"
-OE_SERVICE="/etc/systemd/system/odoo.service"
+OE_CONFIG="/etc/$OE_USER.conf"
+OE_SERVICE="/etc/systemd/system/$OE_USER.service"
 OE_ENTERPRISE="$OE_HOME/enterprise"
 
 # Detectar versión de Odoo si existe
@@ -17,23 +18,23 @@ if [[ -f "$OE_HOME/odoo-bin" ]]; then
     ODOO_VERSION=$($OE_HOME/odoo-bin --version 2>/dev/null | awk '{print $NF}')
 fi
 
-echo "⚠️ Este script eliminará Odoo versión $ODOO_VERSION y su configuración."
+echo "⚠️ Este script eliminará Odoo versión $ODOO_VERSION que corre en el puerto $OE_PORT."
 read -p "¿Estás seguro? (s/N): " confirm
 if [[ "$confirm" != "s" && "$confirm" != "S" ]]; then
   echo "❌ Cancelado."
   exit 1
 fi
 
-echo "🛑 Deteniendo servicio de Odoo..."
-systemctl stop odoo
-systemctl disable odoo
+echo "🛑 Deteniendo servicio de Odoo ($OE_USER)..."
+systemctl stop $OE_USER
+systemctl disable $OE_USER
 
 echo "🧹 Eliminando archivos de Odoo..."
 rm -rf $OE_HOME
 rm -f $OE_SERVICE
 rm -f $OE_CONFIG
-rm -rf /etc/odoo
-rm -rf /var/log/odoo
+rm -rf /etc/$OE_USER
+rm -rf /var/log/$OE_USER
 
 # Eliminar la carpeta Enterprise si fue instalada
 if [ -d "$OE_ENTERPRISE" ]; then
@@ -62,4 +63,4 @@ if [[ "$delweb" == "s" || "$delweb" == "S" ]]; then
   apt-get autoremove -y
 fi
 
-echo "✅ Desinstalación de Odoo $ODOO_VERSION completada."
+echo "✅ Desinstalación de Odoo $ODOO_VERSION en puerto $OE_PORT completada."
