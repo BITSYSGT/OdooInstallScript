@@ -60,7 +60,7 @@ adduser --system --home=$OE_HOME --group --disabled-password --shell=/bin/bash $
 
 # Clonar Odoo
 git config --global http.postBuffer 524288000
-git clone https://github.com/odoo/odoo --branch $OE_VERSION --single-branch $OE_HOME
+git clone https://github.com/odoo/odoo --branch ${OE_VERSION}.0 --single-branch $OE_HOME
 chown -R $OE_USER: $OE_HOME
 
 # Enterprise
