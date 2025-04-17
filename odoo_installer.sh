@@ -6,11 +6,12 @@
 # Compatible con: Ubuntu 22.04 y 24.04 LTS
 #===============================================
 
-# Detectar versión del sistema operativo
+# 🧠 Detectando sistema operativo...
 OS_VERSION=$(lsb_release -rs)
-if [[ "$OS_VERSION" != "24.04" && "$OS_VERSION" != "22.04" ]]; then
-  echo "❌ Este script está diseñado para Ubuntu 22.04 o 24.04 LTS."
-  exit 1
+if [[ "$OS_VERSION" != "22.04" && "$OS_VERSION" != "24.04" ]]; then
+  echo "⚠️ Este script está diseñado para Ubuntu 22.04 o 24.04. Puede no funcionar correctamente en otras versiones."
+  read -p "¿Deseas continuar de todos modos? (s/N): " continue_anyway
+  [[ "$continue_anyway" != "s" && "$continue_anyway" != "S" ]] && exit 1
 fi
 
 # Solicitar versión de Odoo a instalar
