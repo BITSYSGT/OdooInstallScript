@@ -25,7 +25,12 @@ fi
 OE_USER="odoo$OE_VERSION"
 OE_HOME="/opt/$OE_USER"
 OE_PORT_DEFAULT=$((8068 + (OE_VERSION - 15)))
+
+# Mostramos el valor por defecto y pedimos la entrada
+echo "🔹 Puerto por defecto para Odoo: $OE_PORT_DEFAULT"
 read -p "🔹 Ingrese el puerto para Odoo (Enter para usar $OE_PORT_DEFAULT): " OE_PORT
+
+# Si el puerto no fue ingresado, asignamos el valor por defecto
 OE_PORT=${OE_PORT:-$OE_PORT_DEFAULT}
 OE_CONFIG="/etc/${OE_USER}.conf"
 OE_SERVICE="/etc/systemd/system/${OE_USER}.service"
@@ -127,7 +132,7 @@ echo "🎉 INSTALACIÓN COMPLETA DE ODOO $OE_VERSION"
 echo "===================================================="
 echo "Puerto:             $OE_PORT"
 echo "Usuario PostgreSQL: $OE_SUPERADMIN"
-echo "Contraseña DB:       $OE_SUPERADMIN"
+echo "Contraseña DB:      $OE_SUPERADMIN"
 echo "Ruta:               $OE_HOME"
 echo "Log:                $LOGFILE"
 echo "Config:             $OE_CONFIG"
