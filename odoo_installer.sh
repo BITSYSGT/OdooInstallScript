@@ -59,11 +59,11 @@ sudo chown $USER:$USER "$ODOO_DIR"
 
 # Paso 4: Clonar repositorios
 echo "📦 Clonando Odoo Community $ODOO_VERSION..."
-git clone --depth 1 --branch $ODOO_VERSION $ODOO_REPO "$ODOO_DIR/odoo"
+git clone --depth 1 --branch ${ODOO_VERSION}.0 $ODOO_REPO "$ODOO_DIR/odoo"
 
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
     echo "📦 Clonando Odoo Enterprise $ODOO_VERSION..."
-    git clone --depth 1 --branch $ODOO_VERSION https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
+    git clone --depth 1 --branch ${ODOO_VERSION}.0 https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
 fi
 
 # Paso 5: Crear entorno virtual
