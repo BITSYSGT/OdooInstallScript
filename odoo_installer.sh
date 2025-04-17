@@ -11,9 +11,9 @@ clear
 
 echo "╭────────────────────────────────────────────────────────────╮"
 echo "│ ODOO INSTALLER MULTITENANT (ODOO MIT)                      │"
-echo "│ Autor: Bitsys | GT                                         │"
-echo "│ Soporte: https://bitsys.odoo.com                           │"
-echo "│ Compatible: Ubuntu 22.04+ / Odoo 18.0                      │"
+echo "│ Autor: Bitsys | GT                                         │
+echo "│ Soporte: https://bitsys.odoo.com                           │
+echo "│ Compatible: Ubuntu 22.04+ / Odoo 18.0                      │
 echo "╰────────────────────────────────────────────────────────────╯"
 
 echo "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): "
@@ -48,16 +48,32 @@ sudo apt install -y python3-dev python3-pip python3-venv build-essential \
     libsasl2-dev libldap2-dev libssl-dev libmysqlclient-dev \
     libjpeg-dev liblcms2-dev libblas-dev libatlas-base-dev \
     libxml2-dev libxslt1-dev zlib1g-dev npm git postgresql \
-    libpq-dev gcc nginx certbot python3-certbot-nginx
+    libpq-dev gcc certbot
 
-# Paso 2: Verificar y configurar Nginx correctamente
-echo "🔧 Verificando y configurando Nginx..."
+# Paso 2: Solucionar problemas con Nginx antes de instalarlo
+echo "🔧 Solucionando posibles problemas con Nginx..."
+sudo apt remove --purge nginx* -y
+sudo apt autoremove -y
+sudo rm -rf /etc/nginx
+
+# Instalar Nginx y dependencias correctamente
+echo "🔧 Reinstalando Nginx y dependencias..."
+sudo apt install -y nginx python3-certbot-nginx
+
+# Verificar si la instalación de Nginx fue exitosa
 if ! command -v nginx &> /dev/null; then
-    echo "⚠️ Nginx no está instalado correctamente. Intentando reinstalar..."
-    sudo apt install --reinstall nginx -y
+    echo "⚠️ Error crítico: No se pudo instalar Nginx correctamente."
+    echo "Por favor, ejecute manualmente: sudo apt install -y nginx"
+    echo "Y luego vuelva a ejecutar este script."
+    exit 1
 fi
 
-# Crear archivo de configuración básico de nginx si no existe
+# Crear estructura básica de Nginx si no existe
+echo "🔧 Configurando estructura de directorios de Nginx..."
+sudo mkdir -p /etc/nginx/{sites-available,sites-enabled,conf.d}
+sudo mkdir -p /var/log/nginx
+
+# Crear archivo de configuración básico si no existe
 if [ ! -f "/etc/nginx/nginx.conf" ]; then
     echo "🔧 Creando archivo de configuración básico para Nginx..."
     sudo tee /etc/nginx/nginx.conf > /dev/null <<EOF
@@ -87,18 +103,21 @@ http {
 EOF
 fi
 
-# Asegurar que los directorios necesarios existan
-sudo mkdir -p /etc/nginx/sites-available
-sudo mkdir -p /etc/nginx/sites-enabled
-sudo mkdir -p /var/log/nginx
+# Verificar si el archivo mime.types existe
+if [ ! -f "/etc/nginx/mime.types" ]; then
+    echo "🔧 Descargando archivo mime.types..."
+    sudo curl -o /etc/nginx/mime.types https://raw.githubusercontent.com/nginx/nginx/master/conf/mime.types
+fi
 
-# Intentar reiniciar Nginx para aplicar cambios
-sudo systemctl restart nginx || {
-    echo "⚠️ No se pudo reiniciar Nginx. Solucionando problemas..."
+# Verificar configuración de Nginx
+sudo nginx -t || {
+    echo "⚠️ Error en la configuración de Nginx. Solucionando problemas..."
+    sudo apt install --reinstall nginx-common -y
     sudo nginx -t
-    sudo systemctl daemon-reload
-    sudo systemctl start nginx
 }
+
+# Reiniciar Nginx
+sudo systemctl restart nginx
 
 # Paso 3: Crear usuario si no existe
 if id "$ODOO_USER" &>/dev/null; then
