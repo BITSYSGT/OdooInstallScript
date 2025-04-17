@@ -9,7 +9,9 @@
 
 clear
 
-# 🧠 Verificar versión del sistema
+set -e
+
+# Detectar versión de Ubuntu
 OS_VERSION=$(lsb_release -rs)
 if [[ "$OS_VERSION" != "22.04" && "$OS_VERSION" != "24.04" ]]; then
   echo "⚠️ Este script está diseñado para Ubuntu 22.04 o 24.04. Puede no funcionar correctamente en otras versiones."
@@ -17,71 +19,88 @@ if [[ "$OS_VERSION" != "22.04" && "$OS_VERSION" != "24.04" ]]; then
   [[ "$continue_anyway" != "s" && "$continue_anyway" != "S" ]] && exit 1
 fi
 
-# 🔍 Solicitar versión de Odoo a desinstalar
-read -p "🔍 Ingresa la versión de Odoo a eliminar (15, 16, 17, 18): " ODOO_VERSION
+echo "🔍 Buscando versiones de Odoo instaladas..."
+ODOO_USERS=($(ls /opt | grep -Po '^odoo\d+$'))
 
-ODOO_USER="odoo$ODOO_VERSION"
-ODOO_DIR="/opt/odoo$ODOO_VERSION"
-CONFIG_FILE="/etc/odoo$ODOO_VERSION.conf"
-SERVICE_FILE="/etc/systemd/system/odoo$ODOO_VERSION.service"
-LOG_DIR="/var/log/odoo$ODOO_VERSION"
-ENTERPRISE_DIR="$ODOO_DIR/enterprise"
-
-# 🔎 Detectar puerto desde el archivo de configuración
-if [[ -f "$CONFIG_FILE" ]]; then
-  ODOO_PORT=$(grep "xmlrpc_port" "$CONFIG_FILE" | awk -F= '{print $2}' | xargs)
-else
-  ODOO_PORT="desconocido"
-fi
-
-# 🔎 Detectar versión de Odoo si existe
-ODOO_ACTUAL_VERSION="desconocida"
-if [[ -f "$ODOO_DIR/odoo-bin" ]]; then
-    ODOO_ACTUAL_VERSION=$($ODOO_DIR/odoo-bin --version 2>/dev/null | awk '{print $NF}')
-fi
-
-echo "⚠️ Este script eliminará Odoo versión $ODOO_ACTUAL_VERSION que corre como usuario $ODOO_USER y puerto $ODOO_PORT."
-read -p "¿Estás seguro? (s/N): " confirm
-if [[ "$confirm" != "s" && "$confirm" != "S" ]]; then
-  echo "❌ Cancelado."
+if [ ${#ODOO_USERS[@]} -eq 0 ]; then
+  echo "❌ No se encontraron instalaciones de Odoo."
   exit 1
 fi
 
-# 🛑 Detener y deshabilitar el servicio
-echo "🛑 Deteniendo servicio systemd..."
-sudo systemctl stop odoo$ODOO_VERSION
-sudo systemctl disable odoo$ODOO_VERSION
+echo ""
+echo "🔎 Instancias encontradas:"
+select OE_USER in "${ODOO_USERS[@]}" "Eliminar TODAS"; do
+  [[ -z "$OE_USER" ]] && echo "Opción inválida. Intenta de nuevo." && continue
+  break
+done
 
-# 🧹 Eliminar archivos y configuraciones
-echo "🧹 Eliminando archivos y configuraciones..."
-sudo rm -rf "$ODOO_DIR"
-sudo rm -f "$CONFIG_FILE"
-sudo rm -f "$SERVICE_FILE"
-sudo rm -rf "$LOG_DIR"
+delete_instance() {
+  local OE_USER=$1
+  local OE_HOME="/opt/$OE_USER"
+  local OE_CONFIG="/etc/${OE_USER}.conf"
+  local OE_SERVICE="/etc/systemd/system/${OE_USER}.service"
+  local OE_ENTERPRISE="$OE_HOME/enterprise"
 
-# 👤 Eliminar usuario del sistema
-echo "👤 Eliminando usuario del sistema '$ODOO_USER'..."
-sudo userdel -r "$ODOO_USER" 2>/dev/null
+  local OE_PORT="desconocido"
+  [[ -f "$OE_CONFIG" ]] && OE_PORT=$(grep -Po '(?<=xmlrpc_port = )\d+' "$OE_CONFIG")
 
-# 🗃️ Eliminar rol de PostgreSQL
-echo "🗃️ Eliminando rol de PostgreSQL '$ODOO_USER'..."
-sudo -u postgres psql -c "DROP ROLE IF EXISTS $ODOO_USER;" 2>/dev/null
+  local ODOO_VERSION="desconocida"
+  [[ -f "$OE_HOME/odoo-bin" ]] && ODOO_VERSION=$($OE_HOME/odoo-bin --version 2>/dev/null | awk '{print $NF}')
 
-# ❓ ¿Eliminar PostgreSQL?
-read -p "¿Deseas eliminar PostgreSQL también? (s/N): " delpg
-if [[ "$delpg" == "s" || "$delpg" == "S" ]]; then
-  echo "🧨 Eliminando PostgreSQL y sus datos..."
-  sudo apt-get purge -y postgresql*
-  sudo apt-get autoremove -y
-  sudo rm -rf /var/lib/postgresql /etc/postgresql
+  echo "⚠️ Este script eliminará Odoo versión $ODOO_VERSION (usuario: $OE_USER, puerto: $OE_PORT)"
+  read -p "¿Estás seguro? (s/N): " confirm
+  [[ "$confirm" != "s" && "$confirm" != "S" ]] && echo "❌ Cancelado." && return
+
+  # Detener servicio si existe
+  if [[ -f "$OE_SERVICE" ]]; then
+    echo "🛑 Deteniendo servicio systemd..."
+    systemctl stop "$OE_USER" || true
+    systemctl disable "$OE_USER" || true
+    rm -f "$OE_SERVICE"
+  else
+    echo "⚠️ Servicio systemd no encontrado para $OE_USER."
+  fi
+
+  echo "🧹 Eliminando archivos y configuraciones..."
+  rm -rf "$OE_HOME"
+  rm -f "$OE_CONFIG"
+  rm -rf "/etc/$OE_USER"
+  rm -rf "/var/log/$OE_USER"
+
+  [[ -d "$OE_ENTERPRISE" ]] && rm -rf "$OE_ENTERPRISE"
+
+  echo "👤 Eliminando usuario del sistema '$OE_USER'..."
+  userdel -r "$OE_USER" 2>/dev/null || true
+
+  echo "🗃️ Eliminando rol de PostgreSQL '$OE_USER'..."
+  sudo -u postgres psql -c "DROP ROLE IF EXISTS $OE_USER;" 2>/dev/null
+
+  echo "✅ Instancia $OE_USER eliminada correctamente."
+  echo "----------------------------------------------"
+}
+
+if [[ "$OE_USER" == "Eliminar TODAS" ]]; then
+  for u in "${ODOO_USERS[@]}"; do
+    delete_instance "$u"
+  done
+
+  read -p "¿Deseas eliminar PostgreSQL también? (s/N): " delpg
+  if [[ "$delpg" == "s" || "$delpg" == "S" ]]; then
+    echo "🧨 Eliminando PostgreSQL y sus datos..."
+    apt-get purge -y postgresql*
+    apt-get autoremove -y
+    rm -rf /var/lib/postgresql /etc/postgresql
+  fi
+
+  read -p "¿Deseas eliminar Nginx y Certbot? (s/N): " delweb
+  if [[ "$delweb" == "s" || "$delweb" == "S" ]]; then
+    echo "🧹 Eliminando Nginx y Certbot..."
+    apt-get purge -y nginx certbot python3-certbot-nginx
+    apt-get autoremove -y
+  fi
+
+else
+  delete_instance "$OE_USER"
 fi
 
-# ❓ ¿Eliminar Nginx y Certbot?
-read -p "¿Deseas eliminar Nginx y Certbot? (s/N): " delweb
-if [[ "$delweb" == "s" || "$delweb" == "S" ]]; then
-  echo "🧹 Eliminando Nginx y Certbot..."
-  sudo apt-get purge -y nginx certbot python3-certbot-nginx
-  sudo apt-get autoremove -y
-fi
-
-echo "✅ Desinstalación de Odoo $ODOO_ACTUAL_VERSION completada."
+echo "✅ Desinstalación finalizada."
