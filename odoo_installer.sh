@@ -50,17 +50,55 @@ sudo apt install -y python3-dev python3-pip python3-venv build-essential \
     libxml2-dev libxslt1-dev zlib1g-dev npm git postgresql \
     libpq-dev gcc nginx certbot python3-certbot-nginx
 
-# Paso 2: Verificar si nginx está correctamente instalado
+# Paso 2: Verificar y configurar Nginx correctamente
+echo "🔧 Verificando y configurando Nginx..."
 if ! command -v nginx &> /dev/null; then
     echo "⚠️ Nginx no está instalado correctamente. Intentando reinstalar..."
-    sudo apt install --reinstall nginx
-else
-    # Verificar si el archivo de configuración de Nginx está presente
-    if [ ! -f "/etc/nginx/nginx.conf" ]; then
-        echo "⚠️ El archivo de configuración de Nginx no se encuentra. Creando archivo de configuración..."
-        sudo touch /etc/nginx/nginx.conf
-    fi
+    sudo apt install --reinstall nginx -y
 fi
+
+# Crear archivo de configuración básico de nginx si no existe
+if [ ! -f "/etc/nginx/nginx.conf" ]; then
+    echo "🔧 Creando archivo de configuración básico para Nginx..."
+    sudo tee /etc/nginx/nginx.conf > /dev/null <<EOF
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+    worker_connections 768;
+}
+
+http {
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+    gzip on;
+    include /etc/nginx/conf.d/*.conf;
+    include /etc/nginx/sites-enabled/*;
+}
+EOF
+fi
+
+# Asegurar que los directorios necesarios existan
+sudo mkdir -p /etc/nginx/sites-available
+sudo mkdir -p /etc/nginx/sites-enabled
+sudo mkdir -p /var/log/nginx
+
+# Intentar reiniciar Nginx para aplicar cambios
+sudo systemctl restart nginx || {
+    echo "⚠️ No se pudo reiniciar Nginx. Solucionando problemas..."
+    sudo nginx -t
+    sudo systemctl daemon-reload
+    sudo systemctl start nginx
+}
 
 # Paso 3: Crear usuario si no existe
 if id "$ODOO_USER" &>/dev/null; then
