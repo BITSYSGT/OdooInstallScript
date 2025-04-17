@@ -11,9 +11,9 @@ clear
 
 echo "╭────────────────────────────────────────────────────────────╮"
 echo "│ ODOO INSTALLER MULTITENANT (ODOO MIT)                      │"
-echo "│ Autor: Bitsys | GT                                         │
-echo "│ Soporte: https://bitsys.odoo.com                           │
-echo "│ Compatible: Ubuntu 22.04+ / Odoo 18.0                      │
+echo "│ Autor: Bitsys | GT                                         │"
+echo "│ Soporte: https://bitsys.odoo.com                           │"
+echo "│ Compatible: Ubuntu 22.04+ / Odoo 18.0                      │"
 echo "╰────────────────────────────────────────────────────────────╯"
 
 echo "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): "
