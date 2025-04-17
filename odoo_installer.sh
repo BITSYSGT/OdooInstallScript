@@ -54,6 +54,12 @@ sudo apt install -y python3-dev python3-pip python3-venv build-essential \
 if ! command -v nginx &> /dev/null; then
     echo "⚠️ Nginx no está instalado correctamente. Intentando reinstalar..."
     sudo apt install --reinstall nginx
+else
+    # Verificar si el archivo de configuración de Nginx está presente
+    if [ ! -f "/etc/nginx/nginx.conf" ]; then
+        echo "⚠️ El archivo de configuración de Nginx no se encuentra. Creando archivo de configuración..."
+        sudo touch /etc/nginx/nginx.conf
+    fi
 fi
 
 # Paso 3: Crear usuario si no existe
