@@ -46,7 +46,7 @@ find_available_port() {
 }
 
 # Paso 0: Configuración inicial
-echo "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): "
+echo "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): " ODOO_VERSION
 read ODOO_VERSION
 
 DEFAULT_PORT="8071"
