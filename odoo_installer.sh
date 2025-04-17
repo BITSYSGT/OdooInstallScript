@@ -57,21 +57,19 @@ fi
 sudo mkdir -p "$ODOO_DIR"
 sudo chown $USER:$USER "$ODOO_DIR"
 
-# Paso 4: Clonar repositorios
-echo "📦 Clonando Odoo Community $ODOO_VERSION..."
-git clone --depth 1 --branch ${ODOO_VERSION}.0 $ODOO_REPO "$ODOO_DIR/odoo"
+# Paso 4: Mostrar y clonar repositorios
+ODOO_BRANCH="${ODOO_VERSION}.0"
+echo "📦 Se descargará el repositorio de Odoo desde la rama: $ODOO_BRANCH"
+git clone --depth 1 --branch $ODOO_BRANCH $ODOO_REPO "$ODOO_DIR/odoo"
 
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
-    echo "📦 Clonando Odoo Enterprise $ODOO_VERSION..."
-    git clone --depth 1 --branch ${ODOO_VERSION}.0 https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
+    echo "📦 Clonando Odoo Enterprise $ODOO_VERSION desde la rama $ODOO_BRANCH..."
+    git clone --depth 1 --branch $ODOO_BRANCH https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
 fi
 
-# Paso 5: Crear entorno virtual
-echo "🐍 Creando entorno virtual en $ODOO_DIR/venv..."
-python3 -m venv "$ODOO_DIR/venv"
-source "$ODOO_DIR/venv/bin/activate"
-pip install -U pip wheel setuptools
-pip install -r "$ODOO_DIR/odoo/requirements.txt"
+# Paso 5: Instalar requisitos
+echo "📦 Instalando dependencias..."
+pip install --break-system-packages -r "$ODOO_DIR/odoo/requirements.txt"
 
 # Paso 6: Crear symlink para odoo-bin
 ln -s "$ODOO_DIR/odoo/odoo-bin" "$ODOO_DIR/odoo-bin"
@@ -105,7 +103,7 @@ SyslogIdentifier=odoo$ODOO_VERSION
 PermissionsStartOnly=true
 User=$ODOO_USER
 Group=$ODOO_USER
-ExecStart=$ODOO_DIR/venv/bin/python3 $ODOO_DIR/odoo-bin -c $CONFIG_FILE
+ExecStart=$ODOO_DIR/odoo-bin -c $CONFIG_FILE
 StandardOutput=journal+console
 
 [Install]
