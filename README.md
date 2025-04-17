@@ -34,7 +34,7 @@ Durante la ejecución, se te pedirá que selecciones la versión de Odoo (15, 16
 El script también sugerirá un puerto por defecto basado en la versión de Odoo (por ejemplo, 8071 para Odoo 18). Puedes elegir otro puerto si lo deseas.
 
 ```bash
-wget https://raw.githubusercontent.com/BITSYSGT/OdooInstallScript/allinone-multitenant/odoo_installer.sh
+wget https://raw.githubusercontent.com/BITSYSGT/OdooInstallScript/allinone-multitenant-nginx/odoo_installer.sh
 chmod +x odoo_installer.sh
 sudo ./odoo_installer.sh
 ```
@@ -71,7 +71,7 @@ Una vez que el script termine, se mostrará un resumen con la URL de acceso a Od
 Si necesitas desinstalar una instancia de Odoo, el script te permitirá elegir qué versión eliminar. También puedes eliminar PostgreSQL, Nginx y Certbot si lo deseas. Esto no afectará a las otras instancias de Odoo instaladas en tu sistema.
 
 ```bash
-wget https://raw.githubusercontent.com/BITSYSGT/OdooInstallScript/allinone-multitenant/odoo_uninstall.sh
+wget https://raw.githubusercontent.com/BITSYSGT/OdooInstallScript/allinone-multitenant-nginx/odoo_uninstall.sh
 chmod +x odoo_uninstall.sh
 sudo ./odoo_uninstall.sh
 ```
