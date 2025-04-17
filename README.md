@@ -24,6 +24,10 @@ Este repositorio contiene un script de instalación automatizado para **Odoo** (
 ---
 
 ## ▶️ Instalación de Odoo
+Durante la instalación:
+Se te pedirá elegir la versión de Odoo (15, 16, 17, 18).
+Puedes optar por instalar la versión Enterprise (requiere token).
+El script sugiere un puerto basado en la versión (por ejemplo, 8015 para Odoo 15).
 
 ```bash
 wget https://raw.githubusercontent.com/BITSYSGT/OdooInstallScript/allinone-multitenant/odoo_installer.sh
@@ -32,13 +36,11 @@ sudo ./odoo_installer.sh
 
 ```
 
-Durante la instalación:
-Se te pedirá elegir la versión de Odoo (15, 16, 17, 18).
-Puedes optar por instalar la versión Enterprise (requiere token).
-El script sugiere un puerto basado en la versión (por ejemplo, 8015 para Odoo 15).
+
 
 
 ### ⏹️ Desinstalación de una instancia de Odoo
+El script te preguntará qué versión de Odoo deseas eliminar (ej. 18) y luego te permitirá eliminar también PostgreSQL, Nginx y Certbot si lo deseas.
 ```bash
 wget https://raw.githubusercontent.com/BITSYSGT/OdooInstallScript/allinone-multitenant/odoo_uninstall.sh
 chmod +x odoo_uninstall.sh
