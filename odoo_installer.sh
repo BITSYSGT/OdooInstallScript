@@ -87,7 +87,8 @@ ODOO_DIR="/opt/odoo$ODOO_VERSION"
 ODOO_REPO="https://github.com/odoo/odoo.git"
 ODOO_ENTERPRISE_REPO="https://github.com/odoo/enterprise.git"
 CONFIG_FILE="/etc/odoo$ODOO_VERSION.conf"
-LOG_FILE="/var/log/odoo$ODOO_VERSION/odoo.log"
+LOG_DIR="/var/log/odoo$ODOO_VERSION"
+LOG_FILE="$LOG_DIR/odoo.log"
 SERVICE_FILE="/etc/systemd/system/odoo$ODOO_VERSION.service"
 DB_PASSWORD=$(openssl rand -hex 12)
 MASTER_PASSWORD=$(openssl rand -hex 16)
@@ -99,9 +100,16 @@ sudo apt install -y python3-dev python3-pip python3-venv build-essential \
     libsasl2-dev libldap2-dev libssl-dev libmysqlclient-dev \
     libjpeg-dev liblcms2-dev libblas-dev libatlas-base-dev \
     libxml2-dev libxslt1-dev zlib1g-dev npm git postgresql \
-    libpq-dev gcc nginx certbot python3-certbot-nginx
+    libpq-dev gcc nginx certbot python3-certbot-nginx \
+    libfreetype6-dev libzip-dev libwebp-dev libtiff5-dev \
+    libopenjp2-7-dev libharfbuzz-dev libfribidi-dev libxcb1-dev
 
-# Paso 2: Configuración de Nginx
+# Paso 2: Configuración de PostgreSQL
+echo "🔧 Configurando PostgreSQL..."
+sudo -u postgres psql -c "CREATE USER $ODOO_USER WITH PASSWORD '$DB_PASSWORD' CREATEDB;" 2>/dev/null || \
+echo "ℹ️ El usuario PostgreSQL $ODOO_USER ya existe. Continuando..."
+
+# Paso 3: Configuración de Nginx
 echo "🔧 Configurando Nginx..."
 if [ ! -f "/etc/nginx/nginx.conf" ]; then
     sudo tee /etc/nginx/nginx.conf > /dev/null <<EOF
@@ -133,50 +141,59 @@ fi
 
 sudo systemctl restart nginx
 
-# Paso 3: Crear usuario si no existe
+# Paso 4: Crear usuario si no existe
 if id "$ODOO_USER" &>/dev/null; then
     echo "ℹ️ El usuario del sistema '$ODOO_USER' ya existe. Continuando..."
 else
     sudo adduser --system --home="$ODOO_DIR" --group "$ODOO_USER"
 fi
 
-# Paso 4: Preparar directorio de instalación
+# Paso 5: Preparar directorio de instalación
 if [ -d "$ODOO_DIR" ]; then
     echo "⚠️ La carpeta $ODOO_DIR ya existe. Moviéndola a ${ODOO_DIR}_backup_$(date +%s)"
     sudo mv "$ODOO_DIR" "${ODOO_DIR}_backup_$(date +%s)"
 fi
 sudo mkdir -p "$ODOO_DIR"
-sudo chown $USER:$USER "$ODOO_DIR"
+sudo chown $ODOO_USER:$ODOO_USER "$ODOO_DIR"
 
-# Paso 5: Clonar repositorios
+# Paso 6: Clonar repositorios
 ODOO_BRANCH="${ODOO_VERSION}.0"
 echo "📦 Descargando Odoo $ODOO_VERSION (rama $ODOO_BRANCH)..."
-git clone --depth 1 --branch $ODOO_BRANCH $ODOO_REPO "$ODOO_DIR/odoo"
+sudo -u $ODOO_USER git clone --depth 1 --branch $ODOO_BRANCH $ODOO_REPO "$ODOO_DIR/odoo"
 
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
     echo "📦 Clonando Odoo Enterprise $ODOO_VERSION..."
-    git clone --depth 1 --branch $ODOO_BRANCH https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
+    sudo -u $ODOO_USER git clone --depth 1 --branch $ODOO_BRANCH https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
 fi
 
-# Paso 6: Instalar requisitos
-echo "📦 Instalando dependencias..."
-pip install --break-system-packages -r "$ODOO_DIR/odoo/requirements.txt"
+# Paso 7: Instalar requisitos en entorno virtual
+echo "📦 Creando entorno virtual y instalando dependencias..."
+sudo -u $ODOO_USER python3 -m venv "$ODOO_DIR/venv"
+sudo -u $ODOO_USER "$ODOO_DIR/venv/bin/pip" install wheel
+sudo -u $ODOO_USER "$ODOO_DIR/venv/bin/pip" install -r "$ODOO_DIR/odoo/requirements.txt"
 
 # Instalar manualmente librerías problemáticas
 echo "🔧 Instalando dependencias problemáticas específicas..."
-pip install --break-system-packages \
+sudo -u $ODOO_USER "$ODOO_DIR/venv/bin/pip" install \
     reportlab==3.6.12 \
     decorator==4.4.2 \
     lxml_html_clean==0.1.1 \
     pillow==9.5.0 \
-    psycopg2-binary==2.9.9
-    
-# Paso 7: Crear symlink para odoo-bin
-ln -s "$ODOO_DIR/odoo/odoo-bin" "$ODOO_DIR/odoo-bin"
+    psycopg2-binary==2.9.9 \
+    docutils==0.21.2 \
+    zeep==4.3.1
 
-# Paso 8: Crear archivo de configuración
+# Paso 8: Crear symlink para odoo-bin
+sudo -u $ODOO_USER ln -s "$ODOO_DIR/odoo/odoo-bin" "$ODOO_DIR/odoo-bin"
+
+# Paso 9: Configurar logs
+sudo mkdir -p "$LOG_DIR"
+sudo chown $ODOO_USER:$ODOO_USER "$LOG_DIR"
+sudo touch "$LOG_FILE"
+sudo chown $ODOO_USER:$ODOO_USER "$LOG_FILE"
+
+# Paso 10: Crear archivo de configuración
 echo "📝 Creando archivo de configuración..."
-sudo mkdir -p "$(dirname $LOG_FILE)"
 sudo tee $CONFIG_FILE > /dev/null <<EOF
 [options]
 admin_passwd = $MASTER_PASSWORD
@@ -186,10 +203,13 @@ db_user = $ODOO_USER
 db_password = $DB_PASSWORD
 addons_path = $ODOO_DIR/odoo/addons${INSTALL_ENTERPRISE:+,$ODOO_DIR/enterprise}
 logfile = $LOG_FILE
+log_level = info
 xmlrpc_port = $PORT
 EOF
 
-# Paso 9: Crear archivo systemd
+sudo chown $ODOO_USER:$ODOO_USER $CONFIG_FILE
+
+# Paso 11: Crear archivo systemd
 echo "🧩 Creando servicio systemd..."
 sudo tee $SERVICE_FILE > /dev/null <<EOF
 [Unit]
@@ -203,20 +223,20 @@ SyslogIdentifier=odoo$ODOO_VERSION
 PermissionsStartOnly=true
 User=$ODOO_USER
 Group=$ODOO_USER
-ExecStart=$ODOO_DIR/odoo-bin -c $CONFIG_FILE
+ExecStart=$ODOO_DIR/venv/bin/python3 $ODOO_DIR/odoo-bin -c $CONFIG_FILE
 StandardOutput=journal+console
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Paso 10: Asignar permisos y habilitar servicio
+# Paso 12: Asignar permisos y habilitar servicio
 sudo chown -R $ODOO_USER:$ODOO_USER "$ODOO_DIR"
 sudo systemctl daemon-reload
 sudo systemctl enable odoo$ODOO_VERSION
 sudo systemctl start odoo$ODOO_VERSION
 
-# Paso 11: Configuración de Nginx y Certbot
+# Paso 13: Configuración de Nginx y Certbot
 echo "🔧 Configurando Nginx y Certbot..."
 DOMAIN=""
 while [ -z "$DOMAIN" ]; do
@@ -238,10 +258,18 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
+
+    location /longpolling {
+        proxy_pass http://127.0.0.1:$((PORT+1));
+    }
+
+    gzip_types text/css text/less text/plain text/xml application/xml application/json application/javascript;
+    gzip on;
 }
 EOF
 
 sudo ln -s /etc/nginx/sites-available/odoo$ODOO_VERSION /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl restart nginx
 
 # Configurar Certbot si el dominio resuelve
@@ -253,7 +281,7 @@ else
     echo "   sudo certbot --nginx -d $DOMAIN"
 fi
 
-# Paso 12: Mostrar resumen de instalación
+# Paso 14: Mostrar resumen de instalación
 IP=$(hostname -I | awk '{print $1}')
 ADDONS_PATH="$ODOO_DIR/odoo/addons"
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
@@ -284,6 +312,7 @@ echo "├───────────────────────�
 echo "│ 🔗 Accesos:"
 echo "│    - Directo:         http://$IP:$PORT"
 echo "│    - Nginx:           http://$DOMAIN"
+echo "│    - Nginx (SSL):     https://$DOMAIN"
 echo "├───────────────────────────────────────────────────────────────────────────────┤"
 echo "│ ⚙️  Comandos útiles:"
 echo "│    - Iniciar:        sudo systemctl start odoo$ODOO_VERSION"
