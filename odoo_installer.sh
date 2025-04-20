@@ -39,15 +39,14 @@ find_available_port() {
             found_port=$test_port
             break
         fi
-        ((increment++))
+        ((increment++)) 
     done
     
     echo $found_port
 }
 
 # Paso 0: Configuración inicial
-echo "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): " ODOO_VERSION
-read ODOO_VERSION
+read -p "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): " ODOO_VERSION
 
 DEFAULT_PORT="8071"
 
@@ -163,6 +162,15 @@ fi
 echo "📦 Instalando dependencias..."
 pip install --break-system-packages -r "$ODOO_DIR/odoo/requirements.txt"
 
+# Instalar manualmente librerías problemáticas
+echo "🔧 Instalando dependencias problemáticas específicas..."
+pip install --break-system-packages \
+    reportlab==3.6.12 \
+    decorator==4.4.2 \
+    lxml_html_clean==0.1.1 \
+    pillow==9.5.0 \
+    psycopg2-binary==2.9.9
+    
 # Paso 7: Crear symlink para odoo-bin
 ln -s "$ODOO_DIR/odoo/odoo-bin" "$ODOO_DIR/odoo-bin"
 
@@ -264,8 +272,14 @@ echo "│ 🔹 Usuario:            $ODOO_USER"
 echo "│ 🔹 Contraseña DB:      $DB_PASSWORD"
 echo "│ 🔹 Master Password:    $MASTER_PASSWORD"
 echo "│ 🔹 Ruta instalación:   $ODOO_DIR"
+echo "│ 🔹 Archivo configuración: $CONFIG_FILE"
 echo "│ 🔹 Addons Path:        $ADDONS_PATH"
 echo "│ 🔹 Enterprise:         $ENTERPRISE_STATUS"
+echo "├───────────────────────────────────────────────────────────────────────────────┤"
+echo "│ 📋 Archivos importantes:"
+echo "│    - Configuración:   $CONFIG_FILE"
+echo "│    - Logs:            $LOG_FILE"
+echo "│    - Servicio:        $SERVICE_FILE"
 echo "├───────────────────────────────────────────────────────────────────────────────┤"
 echo "│ 🔗 Accesos:"
 echo "│    - Directo:         http://$IP:$PORT"
@@ -273,13 +287,11 @@ echo "│    - Nginx:           http://$DOMAIN"
 echo "├───────────────────────────────────────────────────────────────────────────────┤"
 echo "│ ⚙️  Comandos útiles:"
 echo "│    - Iniciar:        sudo systemctl start odoo$ODOO_VERSION"
-echo "│                      service odoo$ODOO_VERSION start"
 echo "│    - Detener:        sudo systemctl stop odoo$ODOO_VERSION"
-echo "│                      service odoo$ODOO_VERSION stop"
 echo "│    - Reiniciar:      sudo systemctl restart odoo$ODOO_VERSION"
-echo "│                      service odoo$ODOO_VERSION restart"
 echo "│    - Ver logs:       journalctl -u odoo$ODOO_VERSION -f"
-echo "│                      tail -f $LOG_FILE"
+echo "│    - Ver logs:       sudo tail -f $LOG_FILE"
+echo "│    - Ver logs Nginx: sudo tail -f /var/log/nginx/odoo$ODOO_VERSION.error.log"
 echo "╰───────────────────────────────────────────────────────────────────────────────╯"
 echo ""
 echo "⚠️ IMPORTANTE: Guarde esta información en un lugar seguro ⚠️"
