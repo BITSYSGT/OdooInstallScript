@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ╭────────────────────────────────────────────────────────────╮
-# │ ODOO MIGRATION TOOL - VERSIÓN FINAL                        │
+# │ ODOO MIGRATION TOOL - VERSIÓN DEFINITIVA                   │
 # │ Autor: Bit Systems, S.A.                                   │
 # │ Soporte: https://bitsys.odoo.com                           │
 # │ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │
@@ -10,7 +10,7 @@
 clear
 
 echo "╭────────────────────────────────────────────────────────────╮"
-echo "│ ODOO MIGRATION TOOL - VERSIÓN FINAL                        │"
+echo "│ ODOO MIGRATION TOOL - VERSIÓN DEFINITIVA                   │"
 echo "│ Autor: Bitsys | GT                                         │"
 echo "│ Soporte: https://bitsys.odoo.com                           │"
 echo "│ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │"
@@ -100,13 +100,18 @@ else
     echo "ℹ️ Odoo ${TARGET_VERSION} no está instalado. Se procederá a instalarlo."
 fi
 
-# Paso 4: Crear respaldo de la base de datos
+# Paso 4: Crear respaldo completo (base de datos + filestore)
 BACKUP_DIR="/var/lib/postgresql/backups"
 BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_$(date +%Y%m%d_%H%M%S).dump"
+FILESTORE_SOURCE="/var/lib/odoo/.local/share/Odoo/filestore/${DB_NAME}"
+FILESTORE_BACKUP="${BACKUP_DIR}/${DB_NAME}_filestore_backup.tar.gz"
 
-echo "🔧 Creando respaldo de la base de datos..."
+echo "🔧 Creando respaldo completo..."
 sudo mkdir -p "$BACKUP_DIR"
 sudo chown postgres:postgres "$BACKUP_DIR"
+
+# 1. Respaldar base de datos
+echo "🔹 Respaldando base de datos..."
 sudo -u postgres pg_dump -F c -f "$BACKUP_FILE" "$DB_NAME"
 
 if [ $? -ne 0 ]; then
@@ -114,33 +119,42 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "✅ Respaldo creado en: $BACKUP_FILE"
+# 2. Respaldar filestore si existe
+if [ -d "$FILESTORE_SOURCE" ]; then
+    echo "🔹 Respaldando filestore..."
+    sudo tar -czf "$FILESTORE_BACKUP" -C "$FILESTORE_SOURCE" .
+    sudo chown postgres:postgres "$FILESTORE_BACKUP"
+else
+    echo "⚠️ No se encontró el filestore original en $FILESTORE_SOURCE"
+fi
 
-# Paso 5: Configurar entorno de actualización con permisos adecuados
+echo "✅ Respaldo completo creado:"
+echo "   - Base de datos: $BACKUP_FILE"
+echo "   - Filestore: $FILESTORE_BACKUP"
+
+# Paso 5: Configurar entorno de actualización
 UPGRADE_DIR="/var/lib/postgresql/odoo_upgrade_${DB_NAME}"
 echo "🔧 Configurando entorno de actualización en ${UPGRADE_DIR}..."
 
-# Limpiar directorio existente y crear uno nuevo con permisos adecuados
 sudo rm -rf "$UPGRADE_DIR"
 sudo mkdir -p "$UPGRADE_DIR"
 sudo chown postgres:postgres "$UPGRADE_DIR"
 sudo -u postgres mkdir -p "${UPGRADE_DIR}/filestore"
 
-# Paso 6: Copiar filestore original a ubicación esperada
-FILESTORE_SOURCE="/var/lib/odoo/.local/share/Odoo/filestore/${DB_NAME}"
+# Paso 6: Preparar filestore para la herramienta de actualización
 FILESTORE_TARGET="/var/lib/postgresql/.local/share/Odoo/filestore/${DB_NAME}"
 
-if [ -d "$FILESTORE_SOURCE" ]; then
-    echo "🔧 Copiando filestore a ubicación esperada por la herramienta de actualización..."
+if [ -f "$FILESTORE_BACKUP" ]; then
+    echo "🔹 Preparando filestore para la actualización..."
     sudo mkdir -p "/var/lib/postgresql/.local/share/Odoo/filestore"
     sudo chown -R postgres:postgres "/var/lib/postgresql/.local"
-    sudo -u postgres cp -r "$FILESTORE_SOURCE" "$FILESTORE_TARGET"
+    sudo -u postgres mkdir -p "$FILESTORE_TARGET"
+    sudo -u postgres tar -xzf "$FILESTORE_BACKUP" -C "$FILESTORE_TARGET"
 else
-    echo "⚠️ No se encontró el filestore original en $FILESTORE_SOURCE"
-    echo "   El filestore deberá ser migrado manualmente después de la actualización."
+    echo "⚠️ No se encontró respaldo de filestore. Continuando sin filestore..."
 fi
 
-# Paso 7: Ejecutar herramienta de actualización de Odoo con permisos controlados
+# Paso 7: Ejecutar herramienta de actualización
 echo "🔄 Ejecutando herramienta de actualización de Odoo..."
 
 # Verificar registro de la base de datos
@@ -161,17 +175,17 @@ else
     UPGRADE_CMD="cd '$UPGRADE_DIR' && python3 <(curl -s https://upgrade.odoo.com/upgrade) test -d $DB_NAME -t $TARGET_VERSION"
 fi
 
-# Ejecutar como postgres con entorno controlado
+# Ejecutar como postgres
 echo "🔹 Ejecutando actualización como usuario postgres..."
 UPGRADE_OUTPUT=$(sudo -u postgres bash -c "$UPGRADE_CMD")
 
+# Verificar si la actualización fue exitosa
 if [[ "$UPGRADE_OUTPUT" != *"Your database is now ready"* ]]; then
     echo "❌ Error durante la actualización:"
     echo "$UPGRADE_OUTPUT"
-    echo "ℹ️ Directorio de trabajo: $UPGRADE_DIR"
     
-    # Intentar restaurar la base de datos original si falla la actualización
-    echo "🔄 Intentando restaurar la base de datos original..."
+    # Restaurar backup original
+    echo "🔄 Restaurando base de datos original..."
     sudo -u postgres pg_restore -F c -d "$DB_NAME" "$BACKUP_FILE"
     
     exit 1
@@ -199,9 +213,10 @@ if [ $INSTALL_REQUIRED -eq 1 ]; then
     IFS=',' read -r TARGET_DB_USER TARGET_DB_PASSWORD TARGET_PORT TARGET_ADDONS_PATH <<< "$INSTALL_INFO"
 fi
 
-# Paso 9: Configurar permisos y propiedad de la base de datos
-echo "🔧 Configurando permisos y propiedad de la base de datos..."
+# Paso 9: Configurar base de datos migrada
+echo "🔧 Configurando base de datos migrada..."
 
+# 1. Cambiar propietario de la base de datos
 CURRENT_OWNER=$(sudo -u postgres psql -t -c "SELECT pg_catalog.pg_get_userbyid(d.datdba) FROM pg_catalog.pg_database d WHERE d.datname = '$DB_NAME';" | tr -d ' ')
 
 if [ "$CURRENT_OWNER" != "$TARGET_DB_USER" ]; then
@@ -210,31 +225,35 @@ if [ "$CURRENT_OWNER" != "$TARGET_DB_USER" ]; then
     sudo -u postgres psql -d "$DB_NAME" -c "REASSIGN OWNED BY \"$CURRENT_OWNER\" TO \"$TARGET_DB_USER\";"
 fi
 
-# Paso 10: Migrar el filestore a la nueva ubicación
-echo "🔧 Migrando filestore a la nueva versión..."
-
-NEW_FILESTORE_DIR="/var/lib/odoo${TARGET_VERSION_SHORT}/filestore/${DB_NAME}"
-if [ -d "$FILESTORE_TARGET" ]; then
-    echo "🔹 Moviendo filestore actualizado a la nueva ubicación..."
-    sudo mkdir -p "/var/lib/odoo${TARGET_VERSION_SHORT}/filestore"
-    sudo mv "$FILESTORE_TARGET" "$NEW_FILESTORE_DIR"
-    sudo chown -R "odoo${TARGET_VERSION_SHORT}:odoo${TARGET_VERSION_SHORT}" "$NEW_FILESTORE_DIR"
-elif [ -d "$FILESTORE_SOURCE" ]; then
-    echo "🔹 Copiando filestore original a la nueva ubicación..."
-    sudo mkdir -p "/var/lib/odoo${TARGET_VERSION_SHORT}/filestore"
-    sudo cp -r "$FILESTORE_SOURCE" "$NEW_FILESTORE_DIR"
-    sudo chown -R "odoo${TARGET_VERSION_SHORT}:odoo${TARGET_VERSION_SHORT}" "$NEW_FILESTORE_DIR"
-else
-    echo "⚠️ No se encontró el filestore. Deberá ser migrado manualmente."
-fi
-
-# Paso 11: Configurar la instancia de Odoo
-echo "🔧 Configurando instancia de Odoo ${TARGET_VERSION}..."
+# 2. Configurar archivo de configuración
 TARGET_CONFIG_FILE="/etc/odoo${TARGET_VERSION_SHORT}.conf"
-
 sudo sed -i "s/^db_name = .*/db_name = $DB_NAME/" "$TARGET_CONFIG_FILE"
 
-# Reiniciar servicio
+# Paso 10: Migrar filestore a la nueva versión
+NEW_FILESTORE_DIR="/var/lib/odoo${TARGET_VERSION_SHORT}/filestore/${DB_NAME}"
+
+echo "🔧 Migrando filestore..."
+if [ -d "$FILESTORE_TARGET" ]; then
+    # Usar filestore de la actualización
+    echo "🔹 Usando filestore actualizado..."
+    sudo mkdir -p "/var/lib/odoo${TARGET_VERSION_SHORT}/filestore"
+    sudo mv "$FILESTORE_TARGET" "$NEW_FILESTORE_DIR"
+elif [ -f "$FILESTORE_BACKUP" ]; then
+    # Usar filestore original del backup
+    echo "🔹 Restaurando filestore desde el respaldo..."
+    sudo mkdir -p "/var/lib/odoo${TARGET_VERSION_SHORT}/filestore"
+    sudo mkdir -p "$NEW_FILESTORE_DIR"
+    sudo tar -xzf "$FILESTORE_BACKUP" -C "$NEW_FILESTORE_DIR"
+else
+    echo "⚠️ No se encontró filestore para migrar. Deberá copiarlo manualmente."
+fi
+
+# Ajustar permisos del filestore
+if [ -d "$NEW_FILESTORE_DIR" ]; then
+    sudo chown -R "odoo${TARGET_VERSION_SHORT}:odoo${TARGET_VERSION_SHORT}" "$NEW_FILESTORE_DIR"
+fi
+
+# Paso 11: Reiniciar servicio
 echo "🔄 Reiniciando servicio Odoo ${TARGET_VERSION_SHORT}..."
 sudo systemctl restart "odoo${TARGET_VERSION_SHORT}.service"
 
@@ -249,17 +268,15 @@ echo "├───────────────────────�
 echo "│ 🔹 Base de datos:       $DB_NAME"
 echo "│ 🔹 Versión origen:      $CURRENT_VERSION"
 echo "│ 🔹 Versión destino:     $TARGET_VERSION"
-echo "│ 🔹 Respaldo:            $BACKUP_FILE"
+echo "│ 🔹 Respaldo BD:         $BACKUP_FILE"
+echo "│ 🔹 Respaldo Filestore:  $FILESTORE_BACKUP"
+echo "│ 🔹 Filestore nuevo:     $NEW_FILESTORE_DIR"
 echo "│ 🔹 Propietario DB:      $TARGET_DB_USER"
 echo "│ 🔹 Puerto:              $TARGET_PORT"
-echo "│ 🔹 Filestore:           $NEW_FILESTORE_DIR"
 echo "├───────────────────────────────────────────────────────────────────────────────┤"
 echo "│ 🔗 Accesos:"
 echo "│    - Directo:          http://${IP_ADDRESS}:${TARGET_PORT}"
 echo "│    - Web:              https://${DOMAIN_NAME}"
-echo "├───────────────────────────────────────────────────────────────────────────────┤"
-echo "│ ⚠️  NOTA: Si el filestore no se migró automáticamente, copie manualmente"
-echo "│    el contenido de $FILESTORE_SOURCE a $NEW_FILESTORE_DIR"
 echo "╰───────────────────────────────────────────────────────────────────────────────╯"
 
 # Limpieza final
