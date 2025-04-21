@@ -79,8 +79,8 @@ sudo ./odoo_uninstall.sh
 ## ⏹️ Migración de una instancia de Odoo
 ```bash
 wget https://raw.githubusercontent.com/BITSYSGT/OdooInstallScript/instalation-migration /odoo_migration.sh
-chmod +x odoo_installer.sh
-sudo ./odoo_installer.sh
+chmod +x odoo_migration.sh
+sudo ./odoo_migration.sh
 ```
 
 ---
