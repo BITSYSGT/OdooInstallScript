@@ -116,17 +116,20 @@ fi
 
 echo "✅ Respaldo creado en: $BACKUP_FILE"
 
-# Paso 5: Preparar entorno para la actualización
-WORKING_DIR="/tmp/odoo_upgrade_${DB_NAME}"
-echo "🔧 Preparando directorio de trabajo en ${WORKING_DIR}..."
-sudo rm -rf "$WORKING_DIR"
-sudo mkdir -p "$WORKING_DIR"
-sudo chown postgres:postgres "$WORKING_DIR"
+# Paso 5: Configurar entorno de actualización con permisos adecuados
+UPGRADE_DIR="/var/lib/postgresql/odoo_upgrade_${DB_NAME}"
+echo "🔧 Configurando entorno de actualización en ${UPGRADE_DIR}..."
 
-# Paso 6: Ejecutar herramienta de actualización de Odoo
+# Limpiar directorio existente y crear uno nuevo con permisos adecuados
+sudo rm -rf "$UPGRADE_DIR"
+sudo mkdir -p "$UPGRADE_DIR"
+sudo chown postgres:postgres "$UPGRADE_DIR"
+sudo -u postgres mkdir -p "${UPGRADE_DIR}/filestore"
+
+# Paso 6: Ejecutar herramienta de actualización de Odoo con permisos controlados
 echo "🔄 Ejecutando herramienta de actualización de Odoo..."
 
-# Primero verificar si la base de datos está registrada
+# Verificar registro de la base de datos
 REGISTRATION_CHECK=$(sudo -u postgres psql -d "$DB_NAME" -t -c "SELECT value FROM ir_config_parameter WHERE key = 'database.enterprise_code';" | tr -d ' ')
 
 if [ -z "$REGISTRATION_CHECK" ]; then
@@ -136,23 +139,22 @@ if [ -z "$REGISTRATION_CHECK" ]; then
     
     if [ -z "$CONTRACT_CODE" ]; then
         echo "❌ No se puede continuar sin código de suscripción."
-        echo "   Visite https://www.odoo.com/documentation/user/administration/maintain/on_premise.html para más información."
         exit 1
     fi
     
-    UPGRADE_CMD="cd '$WORKING_DIR' && python3 <(curl -s https://upgrade.odoo.com/upgrade) test -d $DB_NAME -t $TARGET_VERSION --contract $CONTRACT_CODE"
+    UPGRADE_CMD="cd '$UPGRADE_DIR' && python3 <(curl -s https://upgrade.odoo.com/upgrade) test -d $DB_NAME -t $TARGET_VERSION --contract $CONTRACT_CODE"
 else
-    UPGRADE_CMD="cd '$WORKING_DIR' && python3 <(curl -s https://upgrade.odoo.com/upgrade) test -d $DB_NAME -t $TARGET_VERSION"
+    UPGRADE_CMD="cd '$UPGRADE_DIR' && python3 <(curl -s https://upgrade.odoo.com/upgrade) test -d $DB_NAME -t $TARGET_VERSION"
 fi
 
-# Ejecutar como postgres usando sudo -u y bash -c
-echo "🔹 Ejecutando: $UPGRADE_CMD"
+# Ejecutar como postgres con entorno controlado
+echo "🔹 Ejecutando actualización como usuario postgres..."
 UPGRADE_OUTPUT=$(sudo -u postgres bash -c "$UPGRADE_CMD")
 
 if [[ "$UPGRADE_OUTPUT" != *"Your database is now ready"* ]]; then
     echo "❌ Error durante la actualización:"
     echo "$UPGRADE_OUTPUT"
-    echo "ℹ️ Directorio de trabajo: $WORKING_DIR"
+    echo "ℹ️ Directorio de trabajo: $UPGRADE_DIR"
     exit 1
 fi
 
@@ -162,18 +164,14 @@ echo "✅ Actualización completada con éxito."
 if [ $INSTALL_REQUIRED -eq 1 ]; then
     echo "🔧 Instalando Odoo ${TARGET_VERSION}..."
     
-    # Verificar si el script de instalación existe
     INSTALL_SCRIPT="./odoo_install.sh"
     if [ ! -f "$INSTALL_SCRIPT" ]; then
         echo "❌ No se encontró el script de instalación ($INSTALL_SCRIPT)"
-        echo "   Descargue el script de instalación y colóquelo en el mismo directorio."
         exit 1
     fi
     
-    # Llamar al script de instalación original
     sudo bash "$INSTALL_SCRIPT"
     
-    # Obtener información de la nueva instalación
     INSTALL_INFO=$(get_installation_info "$TARGET_VERSION")
     if [ $? -ne 0 ]; then
         exit 1
@@ -182,29 +180,34 @@ if [ $INSTALL_REQUIRED -eq 1 ]; then
     IFS=',' read -r TARGET_DB_USER TARGET_DB_PASSWORD TARGET_PORT TARGET_ADDONS_PATH <<< "$INSTALL_INFO"
 fi
 
-# Paso 8: Cambiar el propietario de la base de datos si es necesario
+# Paso 8: Configurar permisos y propiedad de la base de datos
+echo "🔧 Configurando permisos y propiedad de la base de datos..."
+
 CURRENT_OWNER=$(sudo -u postgres psql -t -c "SELECT pg_catalog.pg_get_userbyid(d.datdba) FROM pg_catalog.pg_database d WHERE d.datname = '$DB_NAME';" | tr -d ' ')
 
 if [ "$CURRENT_OWNER" != "$TARGET_DB_USER" ]; then
-    echo "🔧 Cambiando propietario de la base de datos a ${TARGET_DB_USER}..."
+    echo "🔹 Cambiando propietario a ${TARGET_DB_USER}..."
     sudo -u postgres psql -c "ALTER DATABASE \"$DB_NAME\" OWNER TO \"$TARGET_DB_USER\";"
-    
-    # Cambiar propietario de todos los esquemas y tablas
     sudo -u postgres psql -d "$DB_NAME" -c "REASSIGN OWNED BY \"$CURRENT_OWNER\" TO \"$TARGET_DB_USER\";"
 fi
 
-# Paso 9: Configurar la instancia de Odoo para usar la base de datos migrada
-echo "🔧 Configurando la instancia de Odoo ${TARGET_VERSION}..."
+# Paso 9: Configurar la instancia de Odoo
+echo "🔧 Configurando instancia de Odoo ${TARGET_VERSION}..."
 TARGET_CONFIG_FILE="/etc/odoo${TARGET_VERSION_SHORT}.conf"
 
-# Actualizar el archivo de configuración
 sudo sed -i "s/^db_name = .*/db_name = $DB_NAME/" "$TARGET_CONFIG_FILE"
 
-# Reiniciar el servicio
+# Configurar permisos para filestore
+FILESTORE_DIR="/var/lib/odoo${TARGET_VERSION_SHORT}/filestore/${DB_NAME}"
+if [ -d "$FILESTORE_DIR" ]; then
+    sudo chown -R "odoo${TARGET_VERSION_SHORT}:odoo${TARGET_VERSION_SHORT}" "$FILESTORE_DIR"
+fi
+
+# Reiniciar servicio
 echo "🔄 Reiniciando servicio Odoo ${TARGET_VERSION_SHORT}..."
 sudo systemctl restart "odoo${TARGET_VERSION_SHORT}.service"
 
-# Paso 10: Mostrar resumen de la migración
+# Paso 10: Mostrar resumen
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
 DOMAIN_NAME=$(grep 'server_name' /etc/nginx/sites-available/odoo${TARGET_VERSION_SHORT} 2>/dev/null | awk '{print $2}' | head -1 || echo "No configurado")
 
@@ -212,23 +215,17 @@ echo ""
 echo "╭───────────────────────────────────────────────────────────────────────────────╮"
 echo "│ 🎉 MIGRACIÓN COMPLETA DE ODOO $CURRENT_VERSION a $TARGET_VERSION"
 echo "├───────────────────────────────────────────────────────────────────────────────┤"
-echo "│ 🔹 Base de datos original:  $DB_NAME"
-echo "│ 🔹 Versión origen:         $CURRENT_VERSION"
-echo "│ 🔹 Versión destino:        $TARGET_VERSION"
-echo "│ 🔹 Respaldo creado:        $BACKUP_FILE"
-echo "│ 🔹 Nuevo propietario DB:   $TARGET_DB_USER"
-echo "│ 🔹 Puerto de acceso:       $TARGET_PORT"
+echo "│ 🔹 Base de datos:       $DB_NAME"
+echo "│ 🔹 Versión origen:      $CURRENT_VERSION"
+echo "│ 🔹 Versión destino:     $TARGET_VERSION"
+echo "│ 🔹 Respaldo:            $BACKUP_FILE"
+echo "│ 🔹 Propietario DB:      $TARGET_DB_USER"
+echo "│ 🔹 Puerto:              $TARGET_PORT"
 echo "├───────────────────────────────────────────────────────────────────────────────┤"
 echo "│ 🔗 Accesos:"
-echo "│    - Directo:             http://${IP_ADDRESS}:${TARGET_PORT}"
-echo "│    - Web:                 https://${DOMAIN_NAME}"
-echo "├───────────────────────────────────────────────────────────────────────────────┤"
-echo "│ ⚙️  Comandos útiles:"
-echo "│    - Ver logs:            journalctl -u odoo${TARGET_VERSION_SHORT} -f"
-echo "│    - Reiniciar servicio:  sudo systemctl restart odoo${TARGET_VERSION_SHORT}"
+echo "│    - Directo:          http://${IP_ADDRESS}:${TARGET_PORT}"
+echo "│    - Web:              https://${DOMAIN_NAME}"
 echo "╰───────────────────────────────────────────────────────────────────────────────╯"
-echo ""
-echo "⚠️ IMPORTANTE: Verifique que todos los módulos estén correctamente actualizados ⚠️"
 
-# Limpiar directorio de trabajo
-sudo rm -rf "$WORKING_DIR"
+# Limpieza final
+sudo rm -rf "$UPGRADE_DIR"
