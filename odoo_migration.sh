@@ -16,6 +16,15 @@ echo "│ Soporte: https://bitsys.odoo.com                           │"
 echo "│ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │"
 echo "╰────────────────────────────────────────────────────────────╯"
 
+# Función para asegurar que la versión termine en .0
+ensure_version_format() {
+    local version=$1
+    if [[ "$version" != *.* ]]; then
+        version="${version}.0"
+    fi
+    echo "$version"
+}
+
 # Función para limpiar caracteres especiales
 clean_input() {
     echo "$1" | tr -cd '[:alnum:]._-'
@@ -24,7 +33,8 @@ clean_input() {
 # Función para verificar si una versión de Odoo está instalada
 is_version_installed() {
     local version=$1
-    if systemctl list-unit-files | grep -q "odoo${version}.service"; then
+    local short_version=$(echo "$version" | cut -d. -f1)
+    if systemctl list-unit-files | grep -q "odoo${short_version}.service"; then
         return 0
     else
         return 1
@@ -34,7 +44,8 @@ is_version_installed() {
 # Función para obtener información de instalación de una versión
 get_installation_info() {
     local version=$1
-    local config_file="/etc/odoo${version}.conf"
+    local short_version=$(echo "$version" | cut -d. -f1)
+    local config_file="/etc/odoo${short_version}.conf"
     
     if [ ! -f "$config_file" ]; then
         echo "❌ No se encontró el archivo de configuración para Odoo ${version}"
@@ -60,34 +71,36 @@ if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw "$DB_NAME"; then
     exit 1
 fi
 
-# Paso 2: Obtener información de la versión actual (si es posible)
+# Paso 2: Obtener información de la versión actual
 read -p "🔹 Ingrese la versión actual de Odoo (ej: 16.0): " CURRENT_VERSION
 CURRENT_VERSION=$(clean_input "$CURRENT_VERSION")
+CURRENT_VERSION=$(ensure_version_format "$CURRENT_VERSION")
 
 # Paso 3: Obtener versión objetivo
 read -p "🔹 Ingrese la versión objetivo de Odoo (ej: 17.0): " TARGET_VERSION
 TARGET_VERSION=$(clean_input "$TARGET_VERSION")
+TARGET_VERSION=$(ensure_version_format "$TARGET_VERSION")
 
-# Paso 4: Verificar si la versión objetivo está instalada
+# Obtener versión corta (sin .0) para nombres de servicio
 TARGET_VERSION_SHORT=$(echo "$TARGET_VERSION" | cut -d. -f1)
 INSTALL_REQUIRED=1
 
-if is_version_installed "$TARGET_VERSION_SHORT"; then
-    echo "✅ Odoo ${TARGET_VERSION_SHORT} ya está instalado."
+if is_version_installed "$TARGET_VERSION"; then
+    echo "✅ Odoo ${TARGET_VERSION} ya está instalado."
     INSTALL_REQUIRED=0
     
     # Obtener información de la instalación existente
-    INSTALL_INFO=$(get_installation_info "$TARGET_VERSION_SHORT")
+    INSTALL_INFO=$(get_installation_info "$TARGET_VERSION")
     if [ $? -ne 0 ]; then
         exit 1
     fi
     
     IFS=',' read -r TARGET_DB_USER TARGET_DB_PASSWORD TARGET_PORT TARGET_ADDONS_PATH <<< "$INSTALL_INFO"
 else
-    echo "ℹ️ Odoo ${TARGET_VERSION_SHORT} no está instalado. Se procederá a instalarlo."
+    echo "ℹ️ Odoo ${TARGET_VERSION} no está instalado. Se procederá a instalarlo."
 fi
 
-# Paso 5: Crear respaldo de la base de datos
+# Paso 4: Crear respaldo de la base de datos
 BACKUP_DIR="/var/lib/postgresql/backups"
 BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_$(date +%Y%m%d_%H%M%S).dump"
 
@@ -103,7 +116,7 @@ fi
 
 echo "✅ Respaldo creado en: $BACKUP_FILE"
 
-# Paso 6: Ejecutar herramienta de actualización de Odoo
+# Paso 5: Ejecutar herramienta de actualización de Odoo
 echo "🔄 Ejecutando herramienta de actualización de Odoo..."
 
 # Primero verificar si la base de datos está registrada
@@ -111,7 +124,7 @@ REGISTRATION_CHECK=$(sudo -u postgres psql -d "$DB_NAME" -t -c "SELECT value FRO
 
 if [ -z "$REGISTRATION_CHECK" ]; then
     echo "⚠️ La base de datos no está registrada. Necesita un código de suscripción."
-    read -p "🔹 Ingrese el código de contrato (subscription code) o deje vacío para omitir: " CONTRACT_CODE
+    read -p "🔹 Ingrese el código de contrato (subscription code): " CONTRACT_CODE
     CONTRACT_CODE=$(clean_input "$CONTRACT_CODE")
     
     if [ -z "$CONTRACT_CODE" ]; then
@@ -126,6 +139,7 @@ else
 fi
 
 # Ejecutar como postgres usando sudo -u y bash -c
+echo "🔹 Ejecutando: $UPGRADE_CMD"
 UPGRADE_OUTPUT=$(sudo -u postgres bash -c "$UPGRADE_CMD")
 
 if [[ "$UPGRADE_OUTPUT" != *"Your database is now ready"* ]]; then
@@ -136,9 +150,9 @@ fi
 
 echo "✅ Actualización completada con éxito."
 
-# Paso 7: Instalar versión objetivo si es necesario
+# Paso 6: Instalar versión objetivo si es necesario
 if [ $INSTALL_REQUIRED -eq 1 ]; then
-    echo "🔧 Instalando Odoo ${TARGET_VERSION_SHORT}..."
+    echo "🔧 Instalando Odoo ${TARGET_VERSION}..."
     
     # Verificar si el script de instalación existe
     INSTALL_SCRIPT="./odoo_install.sh"
@@ -152,7 +166,7 @@ if [ $INSTALL_REQUIRED -eq 1 ]; then
     sudo bash "$INSTALL_SCRIPT"
     
     # Obtener información de la nueva instalación
-    INSTALL_INFO=$(get_installation_info "$TARGET_VERSION_SHORT")
+    INSTALL_INFO=$(get_installation_info "$TARGET_VERSION")
     if [ $? -ne 0 ]; then
         exit 1
     fi
@@ -160,7 +174,7 @@ if [ $INSTALL_REQUIRED -eq 1 ]; then
     IFS=',' read -r TARGET_DB_USER TARGET_DB_PASSWORD TARGET_PORT TARGET_ADDONS_PATH <<< "$INSTALL_INFO"
 fi
 
-# Paso 8: Cambiar el propietario de la base de datos si es necesario
+# Paso 7: Cambiar el propietario de la base de datos si es necesario
 CURRENT_OWNER=$(sudo -u postgres psql -t -c "SELECT pg_catalog.pg_get_userbyid(d.datdba) FROM pg_catalog.pg_database d WHERE d.datname = '$DB_NAME';" | tr -d ' ')
 
 if [ "$CURRENT_OWNER" != "$TARGET_DB_USER" ]; then
@@ -171,8 +185,8 @@ if [ "$CURRENT_OWNER" != "$TARGET_DB_USER" ]; then
     sudo -u postgres psql -d "$DB_NAME" -c "REASSIGN OWNED BY \"$CURRENT_OWNER\" TO \"$TARGET_DB_USER\";"
 fi
 
-# Paso 9: Configurar la instancia de Odoo para usar la base de datos migrada
-echo "🔧 Configurando la instancia de Odoo ${TARGET_VERSION_SHORT}..."
+# Paso 8: Configurar la instancia de Odoo para usar la base de datos migrada
+echo "🔧 Configurando la instancia de Odoo ${TARGET_VERSION}..."
 TARGET_CONFIG_FILE="/etc/odoo${TARGET_VERSION_SHORT}.conf"
 
 # Actualizar el archivo de configuración
@@ -182,7 +196,7 @@ sudo sed -i "s/^db_name = .*/db_name = $DB_NAME/" "$TARGET_CONFIG_FILE"
 echo "🔄 Reiniciando servicio Odoo ${TARGET_VERSION_SHORT}..."
 sudo systemctl restart "odoo${TARGET_VERSION_SHORT}.service"
 
-# Paso 10: Mostrar resumen de la migración
+# Paso 9: Mostrar resumen de la migración
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
 DOMAIN_NAME=$(grep 'server_name' /etc/nginx/sites-available/odoo${TARGET_VERSION_SHORT} 2>/dev/null | awk '{print $2}' | head -1 || echo "No configurado")
 
