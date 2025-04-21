@@ -16,6 +16,11 @@ echo "│ Soporte: https://bitsys.odoo.com                           │"
 echo "│ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │"
 echo "╰────────────────────────────────────────────────────────────╯"
 
+# Función para limpiar caracteres especiales
+clean_input() {
+    echo "$1" | tr -cd '[:alnum:]._-'
+}
+
 # Función para verificar si un puerto está en uso
 check_port() {
     local port=$1
@@ -47,8 +52,9 @@ find_available_port() {
 
 # Paso 0: Configuración inicial
 read -p "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): " ODOO_VERSION
+ODOO_VERSION=$(clean_input "$ODOO_VERSION")
 
-DEFAULT_PORT="8069"
+DEFAULT_PORT="8071"
 
 # Verificar si el puerto por defecto está disponible
 if check_port $DEFAULT_PORT; then
@@ -58,28 +64,34 @@ if check_port $DEFAULT_PORT; then
     if [ $AVAILABLE_PORT -eq 0 ]; then
         echo "❌ No se encontró un puerto disponible automáticamente."
         read -p "🔹 Ingrese manualmente el puerto para Odoo: " PORT
+        PORT=$(clean_input "$PORT")
     else
         echo "🔹 Se recomienda usar el puerto: $AVAILABLE_PORT"
         read -p "🔹 Ingrese el puerto para Odoo (Enter para usar $AVAILABLE_PORT): " PORT
         PORT=${PORT:-$AVAILABLE_PORT}
+        PORT=$(clean_input "$PORT")
     fi
 else
     echo "✅ Puerto $DEFAULT_PORT está disponible."
     read -p "🔹 Ingrese el puerto para Odoo (Enter para usar $DEFAULT_PORT): " PORT
     PORT=${PORT:-$DEFAULT_PORT}
+    PORT=$(clean_input "$PORT")
 fi
 
 # Verificar nuevamente el puerto seleccionado
 while check_port $PORT; do
     echo "❌ El puerto $PORT ya está en uso. Por favor elija otro."
     read -p "🔹 Ingrese un puerto diferente: " PORT
+    PORT=$(clean_input "$PORT")
 done
 
 read -p "🔹 ¿Deseas instalar la versión Enterprise? (s/N): " INSTALL_ENTERPRISE
 INSTALL_ENTERPRISE=${INSTALL_ENTERPRISE,,}  # convertir a minúscula
+INSTALL_ENTERPRISE=$(clean_input "$INSTALL_ENTERPRISE")
 
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
     read -p "🔹 Ingresa tu token de acceso a GitHub: " GITHUB_TOKEN
+    GITHUB_TOKEN=$(clean_input "$GITHUB_TOKEN")
 fi
 
 ODOO_USER="odoo$ODOO_VERSION"
@@ -106,7 +118,7 @@ sudo apt install -y python3-dev python3-pip python3-venv build-essential \
 
 # Paso 2: Configuración de PostgreSQL
 echo "🔧 Configurando PostgreSQL..."
-sudo -u postgres psql -c "CREATE USER $ODOO_USER WITH PASSWORD '$DB_PASSWORD' CREATEDB;" 2>/dev/null || \
+sudo -u postgres psql -c "CREATE USER \"$ODOO_USER\" WITH PASSWORD '$DB_PASSWORD' CREATEDB;" 2>/dev/null || \
 echo "ℹ️ El usuario PostgreSQL $ODOO_USER ya existe. Continuando..."
 
 # Paso 3: Configuración de Nginx
@@ -145,7 +157,7 @@ sudo systemctl restart nginx
 if id "$ODOO_USER" &>/dev/null; then
     echo "ℹ️ El usuario del sistema '$ODOO_USER' ya existe. Continuando..."
 else
-    sudo adduser --system --home="$ODOO_DIR" --group "$ODOO_USER"
+    sudo adduser --system --home="$ODOO_DIR" --group "$ODOO_USER" --shell /bin/bash
 fi
 
 # Paso 5: Preparar directorio de instalación
@@ -154,27 +166,27 @@ if [ -d "$ODOO_DIR" ]; then
     sudo mv "$ODOO_DIR" "${ODOO_DIR}_backup_$(date +%s)"
 fi
 sudo mkdir -p "$ODOO_DIR"
-sudo chown $ODOO_USER:$ODOO_USER "$ODOO_DIR"
+sudo chown "$ODOO_USER":"$ODOO_USER" "$ODOO_DIR"
 
 # Paso 6: Clonar repositorios
 ODOO_BRANCH="${ODOO_VERSION}.0"
 echo "📦 Descargando Odoo $ODOO_VERSION (rama $ODOO_BRANCH)..."
-sudo -u $ODOO_USER git clone --depth 1 --branch $ODOO_BRANCH $ODOO_REPO "$ODOO_DIR/odoo"
+sudo -u "$ODOO_USER" git clone --depth 1 --branch "$ODOO_BRANCH" "$ODOO_REPO" "$ODOO_DIR/odoo"
 
 if [[ "$INSTALL_ENTERPRISE" == "s" ]]; then
     echo "📦 Clonando Odoo Enterprise $ODOO_VERSION..."
-    sudo -u $ODOO_USER git clone --depth 1 --branch $ODOO_BRANCH https://$GITHUB_TOKEN@github.com/odoo/enterprise.git "$ODOO_DIR/enterprise"
+    sudo -u "$ODOO_USER" git clone --depth 1 --branch "$ODOO_BRANCH" "https://$GITHUB_TOKEN@github.com/odoo/enterprise.git" "$ODOO_DIR/enterprise"
 fi
 
 # Paso 7: Instalar requisitos en entorno virtual
 echo "📦 Creando entorno virtual y instalando dependencias..."
-sudo -u $ODOO_USER python3 -m venv "$ODOO_DIR/venv"
-sudo -u $ODOO_USER "$ODOO_DIR/venv/bin/pip" install wheel
-sudo -u $ODOO_USER "$ODOO_DIR/venv/bin/pip" install -r "$ODOO_DIR/odoo/requirements.txt"
+sudo -u "$ODOO_USER" python3 -m venv "$ODOO_DIR/venv"
+sudo -u "$ODOO_USER" "$ODOO_DIR/venv/bin/pip" install wheel
+sudo -u "$ODOO_USER" "$ODOO_DIR/venv/bin/pip" install -r "$ODOO_DIR/odoo/requirements.txt"
 
 # Instalar manualmente librerías problemáticas
 echo "🔧 Instalando dependencias problemáticas específicas..."
-sudo -u $ODOO_USER "$ODOO_DIR/venv/bin/pip" install \
+sudo -u "$ODOO_USER" "$ODOO_DIR/venv/bin/pip" install \
     reportlab==3.6.12 \
     decorator==4.4.2 \
     lxml_html_clean==0.1.1 \
@@ -184,17 +196,17 @@ sudo -u $ODOO_USER "$ODOO_DIR/venv/bin/pip" install \
     zeep==4.3.1
 
 # Paso 8: Crear symlink para odoo-bin
-sudo -u $ODOO_USER ln -s "$ODOO_DIR/odoo/odoo-bin" "$ODOO_DIR/odoo-bin"
+sudo -u "$ODOO_USER" ln -s "$ODOO_DIR/odoo/odoo-bin" "$ODOO_DIR/odoo-bin"
 
 # Paso 9: Configurar logs
 sudo mkdir -p "$LOG_DIR"
-sudo chown $ODOO_USER:$ODOO_USER "$LOG_DIR"
+sudo chown "$ODOO_USER":"$ODOO_USER" "$LOG_DIR"
 sudo touch "$LOG_FILE"
-sudo chown $ODOO_USER:$ODOO_USER "$LOG_FILE"
+sudo chown "$ODOO_USER":"$ODOO_USER" "$LOG_FILE"
 
 # Paso 10: Crear archivo de configuración
 echo "📝 Creando archivo de configuración..."
-sudo tee $CONFIG_FILE > /dev/null <<EOF
+sudo tee "$CONFIG_FILE" > /dev/null <<EOF
 [options]
 admin_passwd = $MASTER_PASSWORD
 db_host = False
@@ -207,11 +219,11 @@ log_level = info
 xmlrpc_port = $PORT
 EOF
 
-sudo chown $ODOO_USER:$ODOO_USER $CONFIG_FILE
+sudo chown "$ODOO_USER":"$ODOO_USER" "$CONFIG_FILE"
 
 # Paso 11: Crear archivo systemd
 echo "🧩 Creando servicio systemd..."
-sudo tee $SERVICE_FILE > /dev/null <<EOF
+sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Odoo $ODOO_VERSION
 Requires=postgresql.service
@@ -231,19 +243,20 @@ WantedBy=multi-user.target
 EOF
 
 # Paso 12: Asignar permisos y habilitar servicio
-sudo chown -R $ODOO_USER:$ODOO_USER "$ODOO_DIR"
+sudo chown -R "$ODOO_USER":"$ODOO_USER" "$ODOO_DIR"
 sudo systemctl daemon-reload
-sudo systemctl enable odoo$ODOO_VERSION
-sudo systemctl start odoo$ODOO_VERSION
+sudo systemctl enable "odoo$ODOO_VERSION.service"
+sudo systemctl start "odoo$ODOO_VERSION.service"
 
 # Paso 13: Configuración de Nginx y Certbot
 echo "🔧 Configurando Nginx y Certbot..."
 DOMAIN=""
 while [ -z "$DOMAIN" ]; do
     read -p "🔹 Ingrese el dominio para Odoo (ej: odoo.midominio.com): " DOMAIN
+    DOMAIN=$(clean_input "$DOMAIN")
 done
 
-sudo tee /etc/nginx/sites-available/odoo$ODOO_VERSION > /dev/null <<EOF
+sudo tee "/etc/nginx/sites-available/odoo$ODOO_VERSION" > /dev/null <<EOF
 server {
     listen 80;
     server_name $DOMAIN;
@@ -268,13 +281,13 @@ server {
 }
 EOF
 
-sudo ln -s /etc/nginx/sites-available/odoo$ODOO_VERSION /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
+sudo ln -sf "/etc/nginx/sites-available/odoo$ODOO_VERSION" "/etc/nginx/sites-enabled/"
+sudo rm -f "/etc/nginx/sites-enabled/default"
 sudo nginx -t && sudo systemctl restart nginx
 
 # Configurar Certbot si el dominio resuelve
-if ping -c 1 $DOMAIN &> /dev/null; then
-    sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN
+if ping -c 1 "$DOMAIN" &> /dev/null; then
+    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN"
     sudo systemctl restart nginx
 else
     echo "⚠️ El dominio $DOMAIN no resuelve. Configure DNS primero y luego ejecute:"
