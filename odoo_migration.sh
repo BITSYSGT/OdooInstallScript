@@ -9,14 +9,12 @@
 
 clear
 
-cat << "EOF"
-╭────────────────────────────────────────────────────────────╮
-│ ODOO MIGRATION TOOL                                        │
-│ Autor: Bitsys | GT                                         │
-│ Soporte: https://bitsys.odoo.com                           │
-│ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │
-╰────────────────────────────────────────────────────────────╯
-EOF
+echo "╭────────────────────────────────────────────────────────────╮"
+echo "│ ODOO MIGRATION TOOL                                        │"
+echo "│ Autor: Bitsys | GT                                         │"
+echo "│ Soporte: https://bitsys.odoo.com                           │"
+echo "│ Compatible: Ubuntu 22.04+ / Odoo 15.0+                     │"
+echo "╰────────────────────────────────────────────────────────────╯"
 
 # Función para limpiar caracteres especiales
 clean_input() {
@@ -91,11 +89,11 @@ fi
 
 # Paso 5: Crear respaldo de la base de datos
 BACKUP_DIR="/var/lib/postgresql/backups"
-sudo mkdir -p "$BACKUP_DIR"
-sudo chown postgres:postgres "$BACKUP_DIR"
 BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_$(date +%Y%m%d_%H%M%S).dump"
 
 echo "🔧 Creando respaldo de la base de datos..."
+sudo mkdir -p "$BACKUP_DIR"
+sudo chown postgres:postgres "$BACKUP_DIR"
 sudo -u postgres pg_dump -F c -f "$BACKUP_FILE" "$DB_NAME"
 
 if [ $? -ne 0 ]; then
@@ -105,7 +103,7 @@ fi
 
 echo "✅ Respaldo creado en: $BACKUP_FILE"
 
-# Paso 6: Ejecutar herramienta de actualización de Odoo como postgres
+# Paso 6: Ejecutar herramienta de actualización de Odoo
 echo "🔄 Ejecutando herramienta de actualización de Odoo..."
 
 # Primero verificar si la base de datos está registrada
@@ -127,16 +125,8 @@ else
     UPGRADE_CMD="python3 <(curl -s https://upgrade.odoo.com/upgrade) test -d $DB_NAME -t $TARGET_VERSION"
 fi
 
-# Crear un script temporal en el home de postgres
-TEMP_SCRIPT="/var/lib/postgresql/upgrade_script.sh"
-sudo -u postgres bash -c "echo '#!/bin/bash' > $TEMP_SCRIPT"
-sudo -u postgres bash -c "echo 'cd ~' >> $TEMP_SCRIPT"
-sudo -u postgres bash -c "echo '$UPGRADE_CMD' >> $TEMP_SCRIPT"
-sudo -u postgres chmod +x "$TEMP_SCRIPT"
-
-# Ejecutar como postgres
-UPGRADE_OUTPUT=$(sudo -u postgres bash "$TEMP_SCRIPT")
-sudo rm -f "$TEMP_SCRIPT"
+# Ejecutar como postgres usando sudo -u y bash -c
+UPGRADE_OUTPUT=$(sudo -u postgres bash -c "$UPGRADE_CMD")
 
 if [[ "$UPGRADE_OUTPUT" != *"Your database is now ready"* ]]; then
     echo "❌ Error durante la actualización:"
@@ -151,14 +141,15 @@ if [ $INSTALL_REQUIRED -eq 1 ]; then
     echo "🔧 Instalando Odoo ${TARGET_VERSION_SHORT}..."
     
     # Verificar si el script de instalación existe
-    if [ ! -f "./odoo_install.sh" ]; then
-        echo "❌ No se encontró el script de instalación (odoo_install.sh)"
+    INSTALL_SCRIPT="./odoo_install.sh"
+    if [ ! -f "$INSTALL_SCRIPT" ]; then
+        echo "❌ No se encontró el script de instalación ($INSTALL_SCRIPT)"
         echo "   Descargue el script de instalación y colóquelo en el mismo directorio."
         exit 1
     fi
     
     # Llamar al script de instalación original
-    sudo bash ./odoo_install.sh
+    sudo bash "$INSTALL_SCRIPT"
     
     # Obtener información de la nueva instalación
     INSTALL_INFO=$(get_installation_info "$TARGET_VERSION_SHORT")
