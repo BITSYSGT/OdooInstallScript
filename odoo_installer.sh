@@ -48,7 +48,7 @@ find_available_port() {
 # Paso 0: Configuración inicial
 read -p "🔹 Ingrese la versión de Odoo que desea instalar (15, 16, 17, 18): " ODOO_VERSION
 
-DEFAULT_PORT="8071"
+DEFAULT_PORT="8069"
 
 # Verificar si el puerto por defecto está disponible
 if check_port $DEFAULT_PORT; then
